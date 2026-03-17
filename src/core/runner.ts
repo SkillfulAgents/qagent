@@ -16,7 +16,7 @@ import type {
   SuiteResult,
 } from '../types.js'
 import { loadStories } from '../loader/story-loader.js'
-import { runHooks } from '../loader/setup-loader.js'
+import { runHooks } from '../loader/hook-loader.js'
 import {
   buildFeaturePrompt,
   buildStepsPrompt,
@@ -356,7 +356,6 @@ async function runSteps(
     projectDir: ctx.projectDir,
     steps: story.steps!,
     featureNames: story.features,
-    testData: story.testData,
   })
 
   if (driverOptions.verbose) {
@@ -418,7 +417,6 @@ async function runFeatures(
       baseUrl: ctx.baseUrl,
       target: driverOptions.mcpConfigPath ? 'electron' : 'web',
       mode: story.mode,
-      testData: story.testData?.[feat],
     })
 
     if (driverOptions.verbose) {

@@ -3,32 +3,32 @@ import { existsSync } from 'node:fs'
 import type { SetupContext, SetupHookFn } from '../types.js'
 
 /**
- * Dynamically imports and runs setup (or teardown) hooks from the consumer's
- * `setup/` directory. Each hook file must export a default async function.
+ * Dynamically imports and runs hooks from the consumer's `hooks/` directory.
+ * Each hook file must export a default async function.
  *
  * Hook resolution order:
- *   1. <projectDir>/setup/<name>.ts
- *   2. <projectDir>/setup/<name>.js
+ *   1. <projectDir>/hooks/<name>.ts
+ *   2. <projectDir>/hooks/<name>.js
  */
 export async function runHooks(
   hookNames: string[],
   ctx: SetupContext,
-  label: 'setup' | 'teardown' = 'setup',
+  label: string = 'hook',
 ): Promise<void> {
   if (hookNames.length === 0) return
 
-  const setupDir = resolve(ctx.projectDir, 'setup')
+  const hooksDir = resolve(ctx.projectDir, 'hooks')
 
   for (const name of hookNames) {
-    const tsPath = resolve(setupDir, `${name}.ts`)
-    const jsPath = resolve(setupDir, `${name}.js`)
+    const tsPath = resolve(hooksDir, `${name}.ts`)
+    const jsPath = resolve(hooksDir, `${name}.js`)
 
     let hookPath: string | undefined
     if (existsSync(tsPath)) hookPath = tsPath
     else if (existsSync(jsPath)) hookPath = jsPath
 
     if (!hookPath) {
-      console.warn(`  [${label}] Hook not found: ${name} (looked in ${setupDir})`)
+      console.warn(`  [${label}] Hook not found: ${name} (looked in ${hooksDir})`)
       continue
     }
 

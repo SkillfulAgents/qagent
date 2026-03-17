@@ -8,49 +8,26 @@ import type { TestMode, TestTarget } from '../types.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatTestData(data: Record<string, unknown>, indent = 0): string {
-  const pad = '  '.repeat(indent)
-  return Object.entries(data)
-    .map(([key, val]) => {
-      if (val && typeof val === 'object' && !Array.isArray(val)) {
-        return `${pad}- **${key}**:\n${formatTestData(val as Record<string, unknown>, indent + 1)}`
-      }
-      if (Array.isArray(val)) {
-        return `${pad}- **${key}**: ${val.map((v) => `"${v}"`).join(', ')}`
-      }
-      return `${pad}- **${key}**: ${val}`
-    })
-    .join('\n')
-}
-
-// ---------------------------------------------------------------------------
 // System prompt
 // ---------------------------------------------------------------------------
 
 /**
- * Loads the built-in system prompt, then appends the consumer's
- * `system-prompt.md` if it exists in their project directory.
+ * If the consumer provides `system-prompt.md` in their project directory,
+ * it **replaces** the built-in default entirely.
+ * Otherwise the built-in default is used.
  */
 export async function buildSystemPrompt(projectDir: string): Promise<string> {
-  const builtinPath = resolve(__dirname, 'system-prompt.md')
-  let prompt = ''
-
-  try {
-    prompt = await readFile(builtinPath, 'utf-8')
-  } catch {
-    prompt = ''
-  }
-
   const consumerPath = resolve(projectDir, 'system-prompt.md')
   if (existsSync(consumerPath)) {
-    const extra = await readFile(consumerPath, 'utf-8')
-    prompt = prompt ? `${prompt.trim()}\n\n${extra.trim()}` : extra.trim()
+    return (await readFile(consumerPath, 'utf-8')).trim()
   }
 
-  return prompt
+  const builtinPath = resolve(__dirname, 'system-prompt.md')
+  try {
+    return (await readFile(builtinPath, 'utf-8')).trim()
+  } catch {
+    return ''
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +82,6 @@ export interface FeaturePromptOptions {
   mode: TestMode
   appName?: string
   contextHint?: string
-  testData?: Record<string, unknown>
 }
 
 export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<string> {
@@ -116,7 +92,6 @@ export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<st
     target,
     appName = 'the application',
     contextHint = '',
-    testData,
   } = opts
 
   const featureContent = await loadFeatureFile(projectDir, featureName)
@@ -138,10 +113,6 @@ export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<st
 - Take a screenshot after each key action.
 - If you find unexpected behavior, document it as a bug and keep going.`
 
-  const testDataSection = testData
-    ? `\n## Test Data\n\nUse the following data when testing this feature:\n\n${formatTestData(testData)}\n`
-    : ''
-
   const contextSection = contextHint ? `\n## Context\n\n${contextHint}\n` : ''
 
   return `You are a senior QA engineer testing ${appDescription}.
@@ -155,7 +126,7 @@ ${taskInstructions}
 ### Feature: ${featureName}
 
 ${featureContent}
-${testDataSection}
+
 ## Bug Reporting
 
 For each bug, record:
@@ -175,7 +146,6 @@ export interface StepsPromptOptions {
   contextHint?: string
   /** Optional feature names whose specs are included as UI reference. */
   featureNames?: string[]
-  testData?: Record<string, Record<string, unknown>>
 }
 
 /**
@@ -189,7 +159,6 @@ export async function buildStepsPrompt(opts: StepsPromptOptions): Promise<string
     steps,
     contextHint = '',
     featureNames = [],
-    testData,
   } = opts
 
   const contextSection = contextHint ? `\n## Context\n\n${contextHint}\n` : ''
@@ -210,15 +179,6 @@ export async function buildStepsPrompt(opts: StepsPromptOptions): Promise<string
     }
   }
 
-  let testDataSection = ''
-  if (testData && Object.keys(testData).length > 0) {
-    const allData: Record<string, unknown> = {}
-    for (const [, val] of Object.entries(testData)) {
-      Object.assign(allData, val)
-    }
-    testDataSection = `\n## Test Data\n\nUse the following data when executing the steps:\n\n${formatTestData(allData)}\n`
-  }
-
   return `You are a senior QA engineer. You MUST use the Playwright browser tools (browser_navigate, browser_click, browser_type, browser_snapshot, browser_take_screenshot, etc.) to perform all actions in a real browser. Do NOT use WebFetch, WebSearch, or any non-browser tool.
 ${contextSection}
 ## Task
@@ -230,7 +190,7 @@ If a step fails or produces unexpected results, document it as a bug and **conti
 ## Steps
 
 ${steps.trim()}
-${uiReference}${testDataSection}
+${uiReference}
 ## Bug Reporting
 
 For each bug, record:

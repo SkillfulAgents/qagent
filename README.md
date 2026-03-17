@@ -63,9 +63,9 @@ my-tests/
   features/                     # optional: feature spec markdown files
     login.md
     dashboard.md
-  setup/                        # optional: setup/teardown hook scripts
+  hooks/                        # optional: lifecycle hook scripts
     seed-db.ts
-  system-prompt.md              # optional: appended to built-in system prompt
+  system-prompt.md              # optional: overrides built-in system prompt
   .env.local                    # optional: loaded into process.env
 ```
 
@@ -82,10 +82,9 @@ Stories are YAML files in `stories/`. Each file can contain one or multiple YAML
 | `mode` | string | no | `happy-path` \| `feature-test` \| `chaos-monkey` (default: `feature-test`) |
 | `features` | string[] | no | Feature names (map to `features/<name>.md`) |
 | `steps` | string | no | Explicit steps for `happy-path` mode (multiline) |
-| `setup` | string[] | no | Setup hook names to run before the test |
-| `teardown` | string[] | no | Teardown hook names to run after the test |
+| `setup` | string[] | no | Hook names to run before the test (from `hooks/`) |
+| `teardown` | string[] | no | Hook names to run after the test (from `hooks/`) |
 | `tags` | string[] | no | Tags for filtering (`--tag`) |
-| `testData` | object | no | Per-feature test data passed to prompts |
 
 ### Example: happy-path
 
@@ -118,10 +117,6 @@ teardown:
   - cleanup-db
 tags:
   - nightly
-testData:
-  dashboard:
-    username: "test@example.com"
-    password: "secret"
 ```
 
 ### Example: chaos-monkey
@@ -183,9 +178,9 @@ qagent run [options]
 | `--no-clean` | Skip cleanup of temp artifacts | `false` |
 | `--upload` | Upload results to GitHub Artifacts | `false` |
 
-## Setup & Teardown Hooks
+## Hooks
 
-Place `.ts` or `.js` files in `setup/` that export a default async function:
+Place `.ts` or `.js` files in `hooks/` that export a default async function:
 
 ```typescript
 import type { SetupContext } from 'qagent'
@@ -200,19 +195,30 @@ export default async function(ctx: SetupContext): Promise<void> {
 }
 ```
 
-Reference hooks by filename (without extension) in your story's `setup` / `teardown` arrays.
+Reference hooks by filename (without extension) in your story's `setup` and `teardown` arrays:
+
+```yaml
+setup:
+  - seed-db
+teardown:
+  - cleanup-db
+```
 
 ## Custom System Prompt
 
-Create `system-prompt.md` in your project directory to append custom instructions to the built-in system prompt. This is useful for app-specific context:
+Create `system-prompt.md` in your project directory to **replace** the built-in system prompt entirely. The built-in default is minimal (`You are a QA automation engineer performing end-to-end tests via browser automation.`), so your custom version should include any role framing you want plus app-specific context:
 
 ```markdown
-## App-Specific Notes
+You are a QA automation engineer testing MyApp, a project management tool.
 
-- The app uses a custom date picker component. Click the input first, then select a date from the dropdown.
+## Application Knowledge
+
 - After login, wait for the dashboard skeleton to disappear before interacting.
 - The sidebar is collapsible — click the hamburger icon to expand it.
+- The app uses a custom date picker: click the input first, then select from the dropdown.
 ```
+
+If no `system-prompt.md` exists in your project directory, the built-in default is used.
 
 ## Results & Artifacts
 

@@ -1,7 +1,9 @@
 node_modules/
 dist/
 *.tsbuildinfo
-.env.local
 .env
+.env.local
+*.pem
+*.key
 results/
 .playwright-mcp/

@@ -20,11 +20,10 @@ export interface Story {
   setup?: string[]
   teardown?: string[]
   tags?: string[]
-  testData?: Record<string, Record<string, unknown>>
 }
 
 // ---------------------------------------------------------------------------
-// Setup hooks
+// Hooks
 // ---------------------------------------------------------------------------
 
 export interface SetupContext {

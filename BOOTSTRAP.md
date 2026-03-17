@@ -22,8 +22,8 @@ The user needs a project directory with this layout:
 <project-dir>/
   stories/          # REQUIRED: YAML test story files
   features/         # OPTIONAL: markdown feature spec files
-  setup/            # OPTIONAL: TypeScript/JavaScript hook scripts
-  system-prompt.md  # OPTIONAL: custom instructions appended to system prompt
+  hooks/            # OPTIONAL: TypeScript/JavaScript lifecycle hooks
+  system-prompt.md  # OPTIONAL: overrides the built-in system prompt
 ```
 
 ### Story Format (YAML)
@@ -41,17 +41,13 @@ steps: |                      # multiline string, only for happy-path mode
   1. Navigate to http://localhost:3000
   2. Click the login button
   3. ...
-setup:                        # hook filenames (without extension) from setup/
+setup:                        # hook filenames (without extension) from hooks/
   - seed-db
 teardown:
   - cleanup-db
 tags:                         # for filtering with --tag
   - smoke
   - ci
-testData:                     # per-feature test data injected into prompts
-  login:
-    username: "test@example.com"
-    password: "secret123"
 ```
 
 ### Three Test Modes
@@ -86,9 +82,9 @@ The login page at /login allows users to authenticate with email and password.
 4. The Sign In button is disabled while the form is submitting
 ```
 
-### Setup/Teardown Hooks
+### Hooks
 
-TypeScript or JavaScript files in `setup/` that export a default async function:
+TypeScript or JavaScript files in `hooks/` that export a default async function:
 
 ```typescript
 import type { SetupContext } from 'qagent'
@@ -102,9 +98,11 @@ export default async function(ctx: SetupContext): Promise<void> {
 }
 ```
 
+Reference hooks by filename (without extension) in your story's `setup` and `teardown` arrays.
+
 ### Custom System Prompt
 
-`system-prompt.md` in the project directory appends custom instructions to the built-in system prompt. Use it for app-specific quirks, component behaviors, or navigation tips.
+`system-prompt.md` in the project directory **replaces** the built-in system prompt. Use it to set the role framing and include app-specific quirks, component behaviors, or navigation tips.
 
 ### Running
 
@@ -146,17 +144,17 @@ Create YAML story files in `stories/`:
 - Optionally a `chaos.yaml` with a `chaos-monkey` story for bug hunting
 - Use tags like `ci`, `smoke`, `nightly` for filtering
 
-### Step 4: Generate Setup Hooks (if needed)
+### Step 4: Generate Hooks (if needed)
 
-If the app needs test data:
-- Create `setup/<name>.ts` files with seed/cleanup logic
+If the app needs test data or environment preparation:
+- Create `hooks/<name>.ts` files with setup/cleanup logic
 - Reference them in story `setup`/`teardown` arrays
 
 ### Step 5: Generate System Prompt (if needed)
 
-If the app has quirks:
-- Create `system-prompt.md` with app-specific instructions
-- Focus on things that would trip up a first-time tester
+If the app has quirks or you want custom role framing:
+- Create `system-prompt.md` (overrides the built-in default)
+- Include role definition + app-specific instructions that would trip up a first-time tester
 
 ### Step 6: Provide Run Commands
 

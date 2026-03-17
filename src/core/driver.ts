@@ -2,7 +2,7 @@
  * Claude Code CLI driver — spawns the `claude` CLI and captures output.
  * This is a thin wrapper; prompt construction lives in prompt-builder.ts.
  */
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { writeFile, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -14,9 +14,12 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000
 const DEFAULT_MODEL = 'sonnet'
 const DEFAULT_MAX_BUDGET_USD = 5
 
+export type SpawnFn = (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess
+
 export async function runTest(
   testPrompt: string,
   options: DriverOptions = {},
+  spawnFn: SpawnFn = spawn,
 ): Promise<TestResult> {
   const {
     model = DEFAULT_MODEL,
@@ -75,7 +78,7 @@ export async function runTest(
     let stderr = ''
     let killed = false
 
-    const proc: ChildProcess = spawn('claude', args, {
+    const proc: ChildProcess = spawnFn('claude', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, DISABLE_INTERACTIVITY: '1' },
     })

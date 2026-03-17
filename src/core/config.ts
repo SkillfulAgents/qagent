@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 const DEFAULT_PROJECT_DIR = 'qagent'
 
 /**
- * Resolves the project directory (where stories/, features/, setup/ live).
+ * Resolves the project directory (where stories/, features/, hooks/ live).
  * Falls back to `<cwd>/qagent` if not explicitly provided.
  */
 export function resolveProjectDir(explicit?: string): string {
