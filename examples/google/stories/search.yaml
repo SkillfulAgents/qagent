@@ -1,0 +1,17 @@
+id: google-search-smoke
+name: "Google Search happy path"
+mode: happy-path
+features:
+  - search
+tags:
+  - smoke
+  - ci
+steps: |
+  1. Navigate to https://www.google.com
+  2. Verify the search bar is visible
+  3. Type "kiwi fruit" into the search bar
+  4. Press Enter
+  5. Verify search results appear on the page
+  6. Verify the query "kiwi fruit" is shown in the search bar
+  7. Click on the first search result link
+  8. Verify the browser navigated to a new page

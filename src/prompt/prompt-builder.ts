@@ -1,0 +1,280 @@
+import { readFile } from 'node:fs/promises'
+import { resolve, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { loadFeatureFile, loadAllFeatures } from '../loader/story-loader.js'
+import type { TestMode, TestTarget } from '../types.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatTestData(data: Record<string, unknown>, indent = 0): string {
+  const pad = '  '.repeat(indent)
+  return Object.entries(data)
+    .map(([key, val]) => {
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        return `${pad}- **${key}**:\n${formatTestData(val as Record<string, unknown>, indent + 1)}`
+      }
+      if (Array.isArray(val)) {
+        return `${pad}- **${key}**: ${val.map((v) => `"${v}"`).join(', ')}`
+      }
+      return `${pad}- **${key}**: ${val}`
+    })
+    .join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// System prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads the built-in system prompt, then appends the consumer's
+ * `system-prompt.md` if it exists in their project directory.
+ */
+export async function buildSystemPrompt(projectDir: string): Promise<string> {
+  const builtinPath = resolve(__dirname, 'system-prompt.md')
+  let prompt = ''
+
+  try {
+    prompt = await readFile(builtinPath, 'utf-8')
+  } catch {
+    prompt = ''
+  }
+
+  const consumerPath = resolve(projectDir, 'system-prompt.md')
+  if (existsSync(consumerPath)) {
+    const extra = await readFile(consumerPath, 'utf-8')
+    prompt = prompt ? `${prompt.trim()}\n\n${extra.trim()}` : extra.trim()
+  }
+
+  return prompt
+}
+
+// ---------------------------------------------------------------------------
+// Output marker instructions
+// ---------------------------------------------------------------------------
+
+const FEATURE_OUTPUT_INSTRUCTIONS = `
+## Final Output
+
+After testing, end your response with a structured report. The very first line of your report MUST be one of:
+
+[TEST_PASS]
+[TEST_FAIL]
+
+Then continue with:
+
+[REASON] One-line summary of what was tested
+[BUG_FOUND] Description of bug 1
+[BUG_FOUND] Description of bug 2
+[STEP] What you did first — result
+[STEP] What you did next — result
+
+Use [TEST_FAIL] if you found any bugs. Each marker must be on its own line. Do NOT reference screenshot filenames you invented — only reference what you actually see on screen.`
+
+const CHAOS_OUTPUT_INSTRUCTIONS = `
+## Output
+
+As soon as you find a bug, **take a screenshot first**, then STOP and output a report. The very first line MUST be one of:
+
+[BUG_FOUND] Short description of the bug
+[NO_BUG_FOUND]
+
+If you found a bug, continue with:
+
+[ACTION] What you did
+[EXPECTED] What you expected
+[ACTUAL] What actually happened
+[STEP] What you did first — result
+[STEP] What you did next — result
+
+**CRITICAL: The first line of your output MUST start with [BUG_FOUND] or [NO_BUG_FOUND]. This is how the runner detects your findings.**`
+
+// ---------------------------------------------------------------------------
+// Mode-specific prompt builders
+// ---------------------------------------------------------------------------
+
+export interface FeaturePromptOptions {
+  projectDir: string
+  featureName: string
+  baseUrl: string
+  target: TestTarget
+  mode: TestMode
+  appName?: string
+  contextHint?: string
+  testData?: Record<string, unknown>
+}
+
+export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<string> {
+  const {
+    projectDir,
+    featureName,
+    baseUrl,
+    target,
+    appName = 'the application',
+    contextHint = '',
+    testData,
+  } = opts
+
+  const featureContent = await loadFeatureFile(projectDir, featureName)
+  const isElectron = target === 'electron'
+
+  const appDescription = isElectron
+    ? `a desktop Electron app called ${appName} (API at ${baseUrl})`
+    : `a web app called ${appName} at ${baseUrl}`
+
+  const navigationInstruction = isElectron
+    ? `The Electron app is already open. Take a screenshot to see the current state.`
+    : `Navigate to ${baseUrl}.`
+
+  const taskInstructions = `Test the following feature area thoroughly. The description below is a **hint and reference** — it tells you what exists and roughly how to find it, but it is NOT a rigid script. You should:
+
+- Use the hints as a starting point, then **explore beyond them**.
+- Think like a real user: what would they try? What could go wrong?
+- Test the **complete surface area** — not just the happy path.
+- Take a screenshot after each key action.
+- If you find unexpected behavior, document it as a bug and keep going.`
+
+  const testDataSection = testData
+    ? `\n## Test Data\n\nUse the following data when testing this feature:\n\n${formatTestData(testData)}\n`
+    : ''
+
+  const contextSection = contextHint ? `\n## Context\n\n${contextHint}\n` : ''
+
+  return `You are a senior QA engineer testing ${appDescription}.
+${contextSection}
+## Task
+
+${navigationInstruction}
+
+${taskInstructions}
+
+### Feature: ${featureName}
+
+${featureContent}
+${testDataSection}
+## Bug Reporting
+
+For each bug, record:
+- **What you did** (action)
+- **What you expected** (expected result)
+- **What actually happened** (actual result)
+${FEATURE_OUTPUT_INSTRUCTIONS}`
+}
+
+// ---------------------------------------------------------------------------
+// Happy-path with explicit steps
+// ---------------------------------------------------------------------------
+
+export interface StepsPromptOptions {
+  projectDir: string
+  steps: string
+  contextHint?: string
+  /** Optional feature names whose specs are included as UI reference. */
+  featureNames?: string[]
+  testData?: Record<string, Record<string, unknown>>
+}
+
+/**
+ * Builds a prompt for happy-path mode with explicit steps.
+ * Steps contain all navigation/action instructions — no baseUrl/target needed.
+ * Feature specs (if any) are included as background UI reference only.
+ */
+export async function buildStepsPrompt(opts: StepsPromptOptions): Promise<string> {
+  const {
+    projectDir,
+    steps,
+    contextHint = '',
+    featureNames = [],
+    testData,
+  } = opts
+
+  const contextSection = contextHint ? `\n## Context\n\n${contextHint}\n` : ''
+
+  let uiReference = ''
+  if (featureNames.length > 0) {
+    const parts: string[] = []
+    for (const name of featureNames) {
+      try {
+        const content = await loadFeatureFile(projectDir, name)
+        parts.push(`### ${name}\n\n${content}`)
+      } catch {
+        // feature file missing — skip silently
+      }
+    }
+    if (parts.length > 0) {
+      uiReference = `\n## UI Reference\n\nThe following feature descriptions explain the UI elements and their locations. Use them as context when executing the steps.\n\n${parts.join('\n\n---\n\n')}\n`
+    }
+  }
+
+  let testDataSection = ''
+  if (testData && Object.keys(testData).length > 0) {
+    const allData: Record<string, unknown> = {}
+    for (const [, val] of Object.entries(testData)) {
+      Object.assign(allData, val)
+    }
+    testDataSection = `\n## Test Data\n\nUse the following data when executing the steps:\n\n${formatTestData(allData)}\n`
+  }
+
+  return `You are a senior QA engineer. You MUST use the Playwright browser tools (browser_navigate, browser_click, browser_type, browser_snapshot, browser_take_screenshot, etc.) to perform all actions in a real browser. Do NOT use WebFetch, WebSearch, or any non-browser tool.
+${contextSection}
+## Task
+
+Execute the following steps **exactly as written** using the Playwright browser tools. Do not explore beyond them. Do not improvise additional actions. Take a screenshot after each key step.
+
+If a step fails or produces unexpected results, document it as a bug and **continue with the remaining steps**.
+
+## Steps
+
+${steps.trim()}
+${uiReference}${testDataSection}
+## Bug Reporting
+
+For each bug, record:
+- **What you did** (action)
+- **What you expected** (expected result)
+- **What actually happened** (actual result)
+${FEATURE_OUTPUT_INSTRUCTIONS}`
+}
+
+export interface ChaosPromptOptions {
+  projectDir: string
+  baseUrl: string
+  appName?: string
+  avoidRules?: string[]
+}
+
+export async function buildChaosPrompt(opts: ChaosPromptOptions): Promise<string> {
+  const { projectDir, baseUrl, appName = 'the application', avoidRules = [] } = opts
+  const reference = await loadAllFeatures(projectDir)
+
+  const avoidSection =
+    avoidRules.length > 0
+      ? `\n**Off-limits (DO NOT do these):**\n${avoidRules.map((r) => `- ${r}`).join('\n')}\n`
+      : ''
+
+  return `You are an exploration QA tester for a web application called ${appName} at ${baseUrl}.
+
+Your goal: **find one bug**. Explore the app freely — try unexpected flows, edge cases, weird inputs, anything that might break things. As soon as you find a bug, stop and report it.
+
+## Rules
+- Navigate to ${baseUrl} first.
+- You are NOT required to follow any specific order. Do whatever you think is most likely to surface bugs.
+- Try things like: creating items with empty/special-character names, clicking buttons rapidly, navigating away mid-operation, etc.
+- After each interesting action, take a screenshot.
+- As soon as you find a bug (error message, crash, unexpected behavior, UI glitch, broken state), **take a screenshot first**, then STOP and output your report.
+${avoidSection}
+## Reference: Known UI Actions
+Below is a reference of all known features and actions. Use these as inspiration, NOT as a checklist.
+
+${reference}
+${CHAOS_OUTPUT_INSTRUCTIONS}`
+}
+
+export function buildChaosFollowUpPrompt(bugsFound: string[]): string {
+  const bugList = bugsFound.map((b, i) => `${i + 1}. ${b}`).join('\n')
+  return `Good, you found ${bugsFound.length} bug(s) so far:\n${bugList}\n\nKeep going — explore areas you haven't touched yet and find the next bug. Avoid re-testing bugs you already found. As soon as you find a new bug, take a screenshot, then STOP and report it starting with [BUG_FOUND]. If no more bugs, output [NO_BUG_FOUND].`
+}

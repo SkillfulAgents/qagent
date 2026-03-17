@@ -1,0 +1,54 @@
+{
+  "name": "qagent",
+  "version": "0.1.0",
+  "description": "Agentic E2E testing framework",
+  "type": "module",
+  "bin": {
+    "qagent": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && cp src/prompt/system-prompt.md dist/prompt/system-prompt.md",
+    "dev": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "e2e",
+    "testing",
+    "agentic",
+    "claude",
+    "playwright",
+    "mcp"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "claude": "*"
+  },
+  "peerDependenciesMeta": {
+    "claude": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
