@@ -35,7 +35,7 @@ export async function runTest(
   const sessionId = options.sessionId ?? randomUUID()
   const startTime = Date.now()
 
-  const mcpConfigPath = options.mcpConfigPath ?? await ensureDefaultMcpConfig(options.record, options.outputDir)
+  const mcpConfigPath = options.mcpConfigPath ?? await ensureDefaultMcpConfig(options.record, options.outputDir, options.headless)
   const ownsMcpConfig = !options.mcpConfigPath
 
   const args: string[] = [
@@ -139,8 +139,10 @@ export async function runTest(
   })
 }
 
-async function ensureDefaultMcpConfig(record?: boolean, outputDir?: string): Promise<string> {
+async function ensureDefaultMcpConfig(record?: boolean, outputDir?: string, headless?: boolean): Promise<string> {
   const mcpArgs = [resolvePlaywrightMcpBin(), `--output-dir=${outputDir ?? process.cwd()}`]
+  // Force headless when explicitly requested or when no display is available (CI).
+  if (headless ?? !process.env.DISPLAY) mcpArgs.push('--headless')
   if (record) mcpArgs.push('--save-video=1280x720')
 
   const config = { mcpServers: { playwright: { command: 'node', args: mcpArgs } } }
