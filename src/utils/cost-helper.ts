@@ -1,7 +1,7 @@
 /**
  * Parse Claude CLI JSONL session files and compute cost from token usage.
  */
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { CostInfo } from '../types.js'
@@ -44,13 +44,19 @@ function computeCost(
 }
 
 /**
- * Locate the Claude CLI JSONL file for a given session.
- * Claude CLI stores sessions at: ~/.claude/projects/{encoded-cwd}/{sessionId}.jsonl
+ * Find a Claude CLI JSONL file by session ID.
+ * Searches ~/.claude/projects/ since the encoded-cwd subfolder varies.
  */
-export function getSessionJsonlPath(sessionId: string, cwd?: string): string {
-  const projectCwd = cwd ?? process.cwd()
-  const encodedCwd = projectCwd.replace(/\//g, '-')
-  return resolve(homedir(), '.claude', 'projects', encodedCwd, `${sessionId}.jsonl`)
+export async function findSessionJsonl(sessionId: string): Promise<string | null> {
+  const projectsDir = resolve(homedir(), '.claude', 'projects')
+  const filename = `${sessionId}.jsonl`
+  try {
+    for (const dir of await readdir(projectsDir)) {
+      const candidate = resolve(projectsDir, dir, filename)
+      try { await readFile(candidate, { flag: 'r' }); return candidate } catch { /* next */ }
+    }
+  } catch { /* no projects dir */ }
+  return null
 }
 
 interface JsonlUsage {
@@ -71,16 +77,14 @@ interface JsonlEntry {
 /**
  * Read a Claude CLI JSONL session file and compute the total cost.
  */
-export async function computeSessionCost(sessionId: string, cwd?: string): Promise<CostInfo | null> {
-  const jsonlPath = getSessionJsonlPath(sessionId, cwd)
-
-  let content: string
-  try {
-    content = await readFile(jsonlPath, 'utf-8')
-  } catch {
-    console.warn(`[cost] JSONL not found: ${jsonlPath}`)
+export async function computeSessionCost(sessionId: string): Promise<CostInfo | null> {
+  const jsonlPath = await findSessionJsonl(sessionId)
+  if (!jsonlPath) {
+    console.warn(`[cost] JSONL not found for session ${sessionId}`)
     return null
   }
+
+  const content = await readFile(jsonlPath, 'utf-8')
 
   let model = 'unknown'
   let totalInput = 0

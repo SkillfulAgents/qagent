@@ -37,7 +37,7 @@ export async function runTest(
   let systemPromptFile: string | undefined
   let generatedMcpConfig: string | undefined
 
-  const mcpConfigPath = options.mcpConfigPath ?? await ensureDefaultMcpConfig(options.record)
+  const mcpConfigPath = options.mcpConfigPath ?? await ensureDefaultMcpConfig(options.record, options.outputDir)
   generatedMcpConfig = options.mcpConfigPath ? undefined : mcpConfigPath
 
   const args: string[] = [
@@ -80,6 +80,7 @@ export async function runTest(
 
     const proc: ChildProcess = spawnFn('claude', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: options.outputDir,
       env: { ...process.env, DISABLE_INTERACTIVITY: '1' },
     })
 
@@ -181,10 +182,11 @@ export async function runTest(
   })
 }
 
-async function ensureDefaultMcpConfig(record?: boolean): Promise<string> {
-  const mcpArgs = ['@playwright/mcp@latest']
+async function ensureDefaultMcpConfig(record?: boolean, outputDir?: string): Promise<string> {
+  const dir = outputDir ?? process.cwd()
+  const mcpArgs = ['@playwright/mcp@latest', `--output-dir=${dir}`]
   if (record) {
-    mcpArgs.push('--save-video=1280x720', `--output-dir=${process.cwd()}`)
+    mcpArgs.push('--save-video=1280x720')
   }
 
   const config = {

@@ -71,6 +71,8 @@ export interface DriverOptions {
   maxBudgetUsd?: number
   /** Enable video recording via Playwright MCP --save-video. */
   record?: boolean
+  /** Directory where Playwright MCP stores screenshots and videos. Defaults to process.cwd(). */
+  outputDir?: string
 }
 
 // ---------------------------------------------------------------------------

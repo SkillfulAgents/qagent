@@ -2,8 +2,9 @@
  * Test runner / orchestrator.
  * Loads stories, runs setup hooks, builds prompts, invokes the driver, collects results.
  */
-import { mkdir, writeFile, readdir, copyFile, rm, unlink } from 'node:fs/promises'
-import { resolve, join, relative } from 'node:path'
+import { mkdir, writeFile, readdir, rename, rm, mkdtemp } from 'node:fs/promises'
+import { resolve, join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import type {
   RunOptions,
@@ -26,70 +27,52 @@ import {
 } from '../prompt/prompt-builder.js'
 import { parseChaosOutput } from '../prompt/output-parser.js'
 import { runTest } from './driver.js'
-import { computeSessionCost, getSessionJsonlPath } from '../utils/cost-helper.js'
+import { computeSessionCost } from '../utils/cost-helper.js'
 import { resolveRunId } from '../utils/run-id.js'
 
 // ---------------------------------------------------------------------------
-// Artifact collection (screenshots + videos)
+// Artifact collection — move from temp dir into results
 // ---------------------------------------------------------------------------
 
-async function listFiles(dir: string, ext: string): Promise<Set<string>> {
-  try {
-    const files = await readdir(dir)
-    return new Set(files.filter((f) => f.endsWith(ext)))
-  } catch {
-    return new Set()
-  }
-}
-
-interface ArtifactSnapshot {
-  screenshots: Set<string>
-  videos: Set<string>
-}
-
-async function snapshotArtifacts(screenshotDir: string, videosDir: string): Promise<ArtifactSnapshot> {
-  return {
-    screenshots: await listFiles(screenshotDir, '.png'),
-    videos: await listFiles(videosDir, '.webm'),
-  }
-}
-
-async function collectArtifacts(
-  screenshotDir: string,
-  videosDir: string,
-  before: ArtifactSnapshot,
+async function moveArtifacts(
+  tmpDir: string,
   destDir: string,
 ): Promise<{ screenshots: string[]; videos: string[] }> {
   const screenshotsOut = resolve(destDir, 'screenshots')
   const videosOut = resolve(destDir, 'videos')
+  const screenshots: string[] = []
+  const videos: string[] = []
 
-  const ts = new Date().toISOString().replace(/[:.]/g, '-')
+  let files: string[]
+  try { files = await readdir(tmpDir) } catch { return { screenshots, videos } }
 
-  const newScreenshots = [...await listFiles(screenshotDir, '.png')]
-    .filter((f) => !before.screenshots.has(f)).sort()
-  const renamedScreenshots: string[] = []
-  if (newScreenshots.length > 0) {
-    await mkdir(screenshotsOut, { recursive: true })
-    for (const file of newScreenshots) {
-      const dest = `${ts}_${file}`
-      await copyFile(resolve(screenshotDir, file), resolve(screenshotsOut, dest))
-      renamedScreenshots.push(dest)
+  for (const f of files) {
+    if (f.endsWith('.png')) {
+      await mkdir(screenshotsOut, { recursive: true })
+      await rename(resolve(tmpDir, f), resolve(screenshotsOut, f))
+      screenshots.push(f)
+    } else if (f.endsWith('.webm')) {
+      await mkdir(videosOut, { recursive: true })
+      await rename(resolve(tmpDir, f), resolve(videosOut, f))
+      videos.push(f)
     }
   }
 
-  const newVideos = [...await listFiles(videosDir, '.webm')]
-    .filter((f) => !before.videos.has(f)).sort()
-  const renamedVideos: string[] = []
-  if (newVideos.length > 0) {
-    await mkdir(videosOut, { recursive: true })
-    for (const file of newVideos) {
-      const dest = `${ts}_${file}`
-      await copyFile(resolve(videosDir, file), resolve(videosOut, dest))
-      renamedVideos.push(dest)
+  // Playwright MCP may put videos in a videos/ subdirectory
+  const tmpVideos = resolve(tmpDir, 'videos')
+  try {
+    const vFiles = await readdir(tmpVideos)
+    if (vFiles.length > 0) await mkdir(videosOut, { recursive: true })
+    for (const f of vFiles) {
+      if (f.endsWith('.webm')) {
+        await rename(resolve(tmpVideos, f), resolve(videosOut, f))
+        videos.push(f)
+      }
     }
-  }
+  } catch { /* no videos subdir */ }
 
-  return { screenshots: renamedScreenshots, videos: renamedVideos }
+  await rm(tmpDir, { recursive: true, force: true })
+  return { screenshots: screenshots.sort(), videos: videos.sort() }
 }
 
 // ---------------------------------------------------------------------------
@@ -218,12 +201,8 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   const baseResultsDir = resolve(projectDir, 'results')
   const resultsDir = await resolveRunDir(baseResultsDir, runId, append)
 
-  const cwd = process.cwd()
-  const screenshotDir = cwd
-  const videosDir = resolve(cwd, 'videos')
   const suiteStart = Date.now()
   const allResults: StoryResult[] = []
-  const sessionIds = new Set<string>()
 
   for (const story of stories) {
     console.log(`\n${'─'.repeat(60)}`)
@@ -259,31 +238,22 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
     }
 
     if (story.mode === 'chaos-monkey') {
-      await runChaosMonkey(story, ctx, driverOptions, screenshotDir, videosDir, resultsDir, allResults)
+      await runChaosMonkey(story, ctx, driverOptions, resultsDir, allResults)
     } else if (story.mode === 'happy-path' && story.steps) {
-      await runSteps(story, ctx, driverOptions, maxRetries, screenshotDir, videosDir, resultsDir, allResults)
+      await runSteps(story, ctx, driverOptions, maxRetries, resultsDir, allResults)
     } else {
       if (story.mode === 'happy-path') {
         console.warn(`[warn] Story "${story.id}" is happy-path but has no steps, falling back to feature-test mode.`)
       }
-      await runFeatures(story, ctx, driverOptions, maxRetries, screenshotDir, videosDir, resultsDir, allResults)
+      await runFeatures(story, ctx, driverOptions, maxRetries, resultsDir, allResults)
     }
 
-    // --- Teardown hooks ---
     if (story.teardown && story.teardown.length > 0) {
       console.log(`\n[teardown] ${story.teardown.join(', ')}`)
       try {
         await runHooks(story.teardown, ctx, 'teardown')
       } catch (err) {
         console.warn(`[teardown] Warning: ${err instanceof Error ? err.message : String(err)}`)
-      }
-    }
-
-    // Collect session IDs for targeted cleanup later
-    const lastStoryResult = allResults[allResults.length - 1]
-    if (lastStoryResult) {
-      for (const fr of lastStoryResult.featureResults) {
-        if (fr.result.sessionId) sessionIds.add(fr.result.sessionId)
       }
     }
   }
@@ -320,11 +290,6 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   const summaryPath = resolve(resultsDir, 'summary.json')
   await writeFile(summaryPath, JSON.stringify(summary, null, 2), 'utf-8')
 
-  // Cleanup temp artifacts
-  if (!noClean) {
-    await cleanupTempArtifacts(cwd, sessionIds)
-  }
-
   printSummary(summary, allResults, summaryPath, totalDurationMs)
   await printResultsTree(resultsDir)
 
@@ -344,13 +309,11 @@ async function runSteps(
   ctx: SetupContext,
   driverOptions: DriverOptions,
   maxRetries: number,
-  screenshotDir: string,
-  videosDir: string,
   resultsDir: string,
   allResults: StoryResult[],
 ): Promise<void> {
   console.log(`\n> Running steps for story: ${story.id}...`)
-  const before = await snapshotArtifacts(screenshotDir, videosDir)
+  const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
 
   const prompt = await buildStepsPrompt({
     projectDir: ctx.projectDir,
@@ -362,26 +325,22 @@ async function runSteps(
     console.log('[prompt]\n' + prompt + '\n')
   }
 
-  const result = await runFeatureWithRetries(prompt, driverOptions, maxRetries)
-  const featureLabel = 'steps'
-  const featureResults: FeatureResult[] = [{ feature: featureLabel, result }]
+  const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: tmp }, maxRetries)
 
   const storyDir = resolve(resultsDir, 'happy-path', story.id)
   await mkdir(storyDir, { recursive: true })
   await writeFile(resolve(storyDir, 'report.md'), result.rawOutput, 'utf-8')
 
-  const artifacts = await collectArtifacts(screenshotDir, videosDir, before, storyDir)
+  const artifacts = await moveArtifacts(tmp, storyDir)
   if (artifacts.screenshots.length > 0) {
-    console.log(`  [screenshots] ${artifacts.screenshots.length} saved to happy-path/${story.id}/screenshots/`)
+    console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
   }
   if (artifacts.videos.length > 0) {
-    console.log(`  [videos] ${artifacts.videos.length} saved to happy-path/${story.id}/videos/`)
+    console.log(`  [videos] ${artifacts.videos.length} saved`)
   }
 
   printFeatureResult(story.id, result)
-
-  const overallPassed = result.passed
-  allResults.push({ story, featureResults, overallPassed })
+  allResults.push({ story, featureResults: [{ feature: 'steps', result }], overallPassed: result.passed })
 }
 
 // ---------------------------------------------------------------------------
@@ -393,8 +352,6 @@ async function runFeatures(
   ctx: SetupContext,
   driverOptions: DriverOptions,
   maxRetries: number,
-  screenshotDir: string,
-  videosDir: string,
   resultsDir: string,
   allResults: StoryResult[],
 ): Promise<void> {
@@ -409,7 +366,7 @@ async function runFeatures(
 
   for (const feat of features) {
     console.log(`\n> Running feature: ${feat}...`)
-    const before = await snapshotArtifacts(screenshotDir, videosDir)
+    const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
 
     const prompt = await buildFeaturePrompt({
       projectDir: ctx.projectDir,
@@ -423,19 +380,19 @@ async function runFeatures(
       console.log('[prompt]\n' + prompt + '\n')
     }
 
-    const result = await runFeatureWithRetries(prompt, driverOptions, maxRetries)
+    const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: tmp }, maxRetries)
     featureResults.push({ feature: feat, result })
 
     const featDir = resolve(resultsDir, 'feature-test', story.id, feat)
     await mkdir(featDir, { recursive: true })
     await writeFile(resolve(featDir, 'report.md'), result.rawOutput, 'utf-8')
 
-    const artifacts = await collectArtifacts(screenshotDir, videosDir, before, featDir)
+    const artifacts = await moveArtifacts(tmp, featDir)
     if (artifacts.screenshots.length > 0) {
-      console.log(`  [screenshots] ${artifacts.screenshots.length} saved to feature-test/${story.id}/${feat}/screenshots/`)
+      console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
     }
     if (artifacts.videos.length > 0) {
-      console.log(`  [videos] ${artifacts.videos.length} saved to feature-test/${story.id}/${feat}/videos/`)
+      console.log(`  [videos] ${artifacts.videos.length} saved`)
     }
 
     printFeatureResult(feat, result)
@@ -453,8 +410,6 @@ async function runChaosMonkey(
   story: Story,
   ctx: SetupContext,
   driverOptions: DriverOptions,
-  screenshotDir: string,
-  videosDir: string,
   resultsDir: string,
   allResults: StoryResult[],
 ): Promise<void> {
@@ -473,7 +428,7 @@ async function runChaosMonkey(
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     console.log(`\n> [chaos-monkey] Round ${round}/${MAX_ROUNDS}...`)
-    const before = await snapshotArtifacts(screenshotDir, videosDir)
+    const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
 
     const isFirstRound = round === 1
     const prompt = isFirstRound ? initialPrompt : buildChaosFollowUpPrompt(bugsFound)
@@ -486,11 +441,13 @@ async function runChaosMonkey(
     try {
       result = await runTest(prompt, {
         ...driverOptions,
+        outputDir: tmp,
         sessionId: isFirstRound ? sessionId : undefined,
         resumeSessionId: isFirstRound ? undefined : sessionId,
       })
     } catch (err) {
       console.warn(`[chaos-monkey] Round ${round} error: ${err instanceof Error ? err.message : String(err)}`)
+      await rm(tmp, { recursive: true, force: true })
       break
     }
 
@@ -498,12 +455,12 @@ async function runChaosMonkey(
     await mkdir(roundDir, { recursive: true })
     await writeFile(resolve(roundDir, 'report.md'), result.rawOutput, 'utf-8')
 
-    const artifacts = await collectArtifacts(screenshotDir, videosDir, before, roundDir)
+    const artifacts = await moveArtifacts(tmp, roundDir)
     if (artifacts.screenshots.length > 0) {
-      console.log(`  [screenshots] ${artifacts.screenshots.length} saved to chaos-monkey/${story.id}/round-${round}/screenshots/`)
+      console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
     }
     if (artifacts.videos.length > 0) {
-      console.log(`  [videos] ${artifacts.videos.length} saved to chaos-monkey/${story.id}/round-${round}/videos/`)
+      console.log(`  [videos] ${artifacts.videos.length} saved`)
     }
 
     const parsed = parseChaosOutput(result.rawOutput)
@@ -593,26 +550,6 @@ async function resolveRunDir(baseResultsDir: string, runId: string, append: bool
   return target
 }
 
-async function cleanupTempArtifacts(cwd: string, sessionIds: Set<string>): Promise<void> {
-  // Delete loose .png files in cwd (Playwright MCP screenshots)
-  try {
-    const files = await readdir(cwd)
-    for (const f of files) {
-      if (f.endsWith('.png')) {
-        await unlink(resolve(cwd, f)).catch(() => {})
-      }
-    }
-  } catch { /* ignore */ }
-
-  // Delete cwd/videos/ (Playwright MCP video output)
-  await rm(resolve(cwd, 'videos'), { recursive: true, force: true })
-
-  // Delete only the JSONL session files produced by this run (not the entire projects dir)
-  for (const sid of sessionIds) {
-    const jsonlPath = getSessionJsonlPath(sid, cwd)
-    await unlink(jsonlPath).catch(() => {})
-  }
-}
 
 async function printResultsTree(resultsDir: string): Promise<void> {
   console.log(`\nResults tree:`)
