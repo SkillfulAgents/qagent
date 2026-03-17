@@ -52,18 +52,6 @@ describe('loadStories', () => {
     expect(byName.map((s) => s.id)).toEqual(['dashboard'])
   })
 
-  it('filters by tag', async () => {
-    const dir = await createProject()
-    await writeFile(join(dir, 'stories', 's.yaml'), `id: s\nname: S\ntags:\n  - smoke\n  - ci\n`)
-    await writeFile(join(dir, 'stories', 't.yaml'), `id: t\nname: T\ntags:\n  - ci\n`)
-
-    const smokeOnly = await loadStories(dir, undefined, 'smoke')
-    expect(smokeOnly.map((s) => s.id)).toEqual(['s'])
-
-    const ci = await loadStories(dir, undefined, 'ci')
-    expect(ci).toHaveLength(2)
-  })
-
   it('throws when stories directory does not exist', async () => {
     const dir = await createProject()
     await rm(join(dir, 'stories'), { recursive: true, force: true })

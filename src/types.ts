@@ -4,8 +4,6 @@
 
 export type TestMode = 'happy-path' | 'feature-test' | 'chaos-monkey'
 
-export type TestTarget = 'web' | 'electron'
-
 // ---------------------------------------------------------------------------
 // Story (loaded from YAML)
 // ---------------------------------------------------------------------------
@@ -85,7 +83,6 @@ export interface RunOptions {
   verbose: boolean
   maxRetries: number
   baseUrl: string
-  target: TestTarget
   model?: string
   budgetOverride?: number
   projectDir: string
@@ -105,7 +102,6 @@ export interface StoryRunContext {
   story: Story
   setupCtx: SetupContext
   driverOptions: DriverOptions
-  target: TestTarget
   maxRetries: number
   resultsDir: string
 }

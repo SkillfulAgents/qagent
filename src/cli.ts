@@ -4,12 +4,12 @@
  *
  * Usage:
  *   npx qagent run [--filter <pattern>] [--verbose]
- *                   [--retries <n>] [--base-url <url>] [--target web|electron]
+ *                   [--retries <n>] [--base-url <url>]
  *                   [--model <model>] [--budget <usd>] [--project-dir <path>]
  */
 import { resolveProjectDir, loadEnvFile } from './core/config.js'
 import { run } from './core/runner.js'
-import type { RunOptions, TestTarget } from './types.js'
+import type { RunOptions } from './types.js'
 
 function printHelp(): void {
   console.log(`
@@ -23,7 +23,6 @@ Options:
   --verbose               Show full agent output
   --retries <n>           Max retries per feature (default: 1)
   --base-url <url>        Application base URL (default: http://localhost:3000)
-  --target <web|electron> Test target (default: web)
   --model <model>         Claude model to use (default: sonnet)
   --budget <usd>          Per-test spending cap in USD
   --project-dir <path>    Path to the qagent project directory
@@ -42,7 +41,6 @@ function parseArgs(): { command: string; options: RunOptions } {
   let verbose = false
   let maxRetries = 1
   let baseUrl = 'http://localhost:3000'
-  let target: TestTarget = 'web'
   let model: string | undefined
   let budgetOverride: number | undefined
   let projectDirArg: string | undefined
@@ -63,13 +61,6 @@ function parseArgs(): { command: string; options: RunOptions } {
         break
       case '--base-url':
         baseUrl = args[++i]
-        break
-      case '--target':
-        target = args[++i] as TestTarget
-        if (target !== 'web' && target !== 'electron') {
-          console.error(`Invalid target: ${target}. Must be "web" or "electron".`)
-          process.exit(1)
-        }
         break
       case '--model':
         model = args[++i]
@@ -100,7 +91,7 @@ function parseArgs(): { command: string; options: RunOptions } {
 
   return {
     command,
-    options: { filter, verbose, maxRetries, baseUrl, target, model, budgetOverride, projectDir, record, append, upload },
+    options: { filter, verbose, maxRetries, baseUrl, model, budgetOverride, projectDir, record, append, upload },
   }
 }
 

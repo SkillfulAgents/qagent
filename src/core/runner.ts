@@ -2,10 +2,9 @@
  * Test runner / orchestrator.
  * Loads stories, runs setup hooks, builds prompts, invokes the driver, collects results.
  */
-import { mkdir, writeFile, readdir, rename, rm, mkdtemp } from 'node:fs/promises'
+import { mkdir, writeFile, readdir, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import type {
   RunOptions,
@@ -36,48 +35,23 @@ import { computeSessionCost } from '../utils/cost-helper.js'
 import { resolveRunId } from '../utils/run-id.js'
 
 // ---------------------------------------------------------------------------
-// Artifact collection — move from temp dir into results
+// Artifact count — screenshots/videos written directly to resultsDir by MCP
 // ---------------------------------------------------------------------------
 
-async function moveArtifacts(
-  tmpDir: string,
-  destDir: string,
-): Promise<{ screenshots: string[]; videos: string[] }> {
-  const screenshotsOut = resolve(destDir, 'screenshots')
-  const videosOut = resolve(destDir, 'videos')
-  const screenshots: string[] = []
-  const videos: string[] = []
-
-  let files: string[]
-  try { files = await readdir(tmpDir) } catch { return { screenshots, videos } }
-
-  for (const f of files) {
-    if (f.endsWith('.png')) {
-      await mkdir(screenshotsOut, { recursive: true })
-      await rename(resolve(tmpDir, f), resolve(screenshotsOut, f))
-      screenshots.push(f)
-    } else if (f.endsWith('.webm')) {
-      await mkdir(videosOut, { recursive: true })
-      await rename(resolve(tmpDir, f), resolve(videosOut, f))
-      videos.push(f)
-    }
-  }
-
-  // Playwright MCP may put videos in a videos/ subdirectory
-  const tmpVideos = resolve(tmpDir, 'videos')
+async function countArtifacts(dir: string): Promise<{ screenshots: number; videos: number }> {
+  let screenshots = 0, videos = 0
   try {
-    const vFiles = await readdir(tmpVideos)
-    if (vFiles.length > 0) await mkdir(videosOut, { recursive: true })
-    for (const f of vFiles) {
-      if (f.endsWith('.webm')) {
-        await rename(resolve(tmpVideos, f), resolve(videosOut, f))
-        videos.push(f)
-      }
+    for (const f of await readdir(dir)) {
+      if (f.endsWith('.png')) screenshots++
+      else if (f.endsWith('.webm')) videos++
     }
-  } catch { /* no videos subdir */ }
+  } catch { /* dir may not exist */ }
+  return { screenshots, videos }
+}
 
-  await rm(tmpDir, { recursive: true, force: true })
-  return { screenshots: screenshots.sort(), videos: videos.sort() }
+function logArtifacts(artifacts: { screenshots: number; videos: number }) {
+  if (artifacts.screenshots > 0) console.log(`  [screenshots] ${artifacts.screenshots} saved`)
+  if (artifacts.videos > 0) console.log(`  [videos] ${artifacts.videos} saved`)
 }
 
 // ---------------------------------------------------------------------------
@@ -151,26 +125,17 @@ function printFeatureResult(feature: string, result: TestResult) {
   }
 }
 
-function logArtifacts(artifacts: { screenshots: string[]; videos: string[] }) {
-  if (artifacts.screenshots.length > 0) {
-    console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
-  }
-  if (artifacts.videos.length > 0) {
-    console.log(`  [videos] ${artifacts.videos.length} saved`)
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Build StoryRunContext — centralises all per-story config resolution
 // ---------------------------------------------------------------------------
 
-function buildStoryRunContext(
+async function buildStoryRunContext(
   story: Story,
   opts: RunOptions,
   systemPrompt: string,
   resultsDir: string,
   budget: number,
-): StoryRunContext {
+): Promise<StoryRunContext> {
   const effectiveBaseUrl = story.baseUrl ?? opts.baseUrl
 
   const setupCtx: SetupContext = {
@@ -179,6 +144,8 @@ function buildStoryRunContext(
     store: new Map(),
     projectDir: opts.projectDir,
   }
+
+  setupCtx.store.set('qagentRecord', !!opts.record)
 
   const driverOptions: DriverOptions = {
     verbose: opts.verbose,
@@ -192,7 +159,6 @@ function buildStoryRunContext(
     story,
     setupCtx,
     driverOptions,
-    target: opts.target,
     maxRetries: opts.maxRetries,
     resultsDir,
   }
@@ -207,8 +173,8 @@ function applyStoreOverrides(rc: StoryRunContext): void {
   if (store.has('mcpConfigPath')) {
     rc.driverOptions.mcpConfigPath = store.get('mcpConfigPath') as string
   }
-  if (store.has('electronBaseUrl')) {
-    rc.setupCtx.baseUrl = store.get('electronBaseUrl') as string
+  if (store.has('baseUrl')) {
+    rc.setupCtx.baseUrl = store.get('baseUrl') as string
   }
 }
 
@@ -250,6 +216,7 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
     upload = false,
   } = opts
 
+
   const budget = budgetOverride ?? 5
 
   const runId = resolveRunId()
@@ -257,7 +224,6 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   console.log('=== QAgent Test Runner ===\n')
   console.log(`Project dir: ${projectDir}`)
   console.log(`Run ID:      ${runId}`)
-  console.log(`Target:      ${opts.target}`)
   if (record) console.log(`Record:      enabled`)
   console.log(`Base URL:    ${baseUrl}`)
   console.log(`Max retries: ${opts.maxRetries}`)
@@ -290,34 +256,35 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
     console.log(`> [${story.id}] ${story.name} (${story.mode})`)
     console.log(`${'─'.repeat(60)}`)
 
-    const rc = buildStoryRunContext(story, opts, systemPrompt, resultsDir, budget)
-
-    // --- Setup hooks ---
-    if (story.setup && story.setup.length > 0) {
-      console.log(`\n[setup] ${story.setup.join(', ')}`)
-      try {
-        await runHooks(story.setup, rc.setupCtx, 'setup')
-      } catch (err) {
-        const reason = `Setup failed: ${err instanceof Error ? err.message : String(err)}`
-        console.error(`[setup] ${reason}`)
-        allResults.push({ story, featureResults: [], overallPassed: false })
-        continue
+    const rc = await buildStoryRunContext(story, opts, systemPrompt, resultsDir, budget)
+    let setupOk = true
+    try {
+      // --- Setup hooks ---
+      if (story.setup && story.setup.length > 0) {
+        console.log(`\n[setup] ${story.setup.join(', ')}`)
+        try {
+          await runHooks(story.setup, rc.setupCtx, 'setup', () => applyStoreOverrides(rc))
+        } catch (err) {
+          setupOk = false
+          const reason = `Setup failed: ${err instanceof Error ? err.message : String(err)}`
+          console.error(`[setup] ${reason}`)
+          allResults.push({ story, featureResults: [], overallPassed: false })
+        }
       }
-    }
 
-    // Hooks may inject driver-level config into store (e.g. launch-electron sets mcpConfigPath).
-    applyStoreOverrides(rc)
-
-    const result = await dispatchStory(rc)
-    allResults.push(result)
-
-    // --- Teardown hooks ---
-    if (story.teardown && story.teardown.length > 0) {
-      console.log(`\n[teardown] ${story.teardown.join(', ')}`)
-      try {
-        await runHooks(story.teardown, rc.setupCtx, 'teardown')
-      } catch (err) {
-        console.warn(`[teardown] Warning: ${err instanceof Error ? err.message : String(err)}`)
+      if (setupOk) {
+        const result = await dispatchStory(rc)
+        allResults.push(result)
+      }
+    } finally {
+      // Always attempt teardown for cleanup, even if setup/story execution failed.
+      if (story.teardown && story.teardown.length > 0) {
+        console.log(`\n[teardown] ${story.teardown.join(', ')}`)
+        try {
+          await runHooks(story.teardown, rc.setupCtx, 'teardown')
+        } catch (err) {
+          console.warn(`[teardown] Warning: ${err instanceof Error ? err.message : String(err)}`)
+        }
       }
     }
   }
@@ -387,7 +354,9 @@ async function runSteps(rc: StoryRunContext): Promise<StoryResult> {
   const { story, setupCtx, driverOptions, maxRetries, resultsDir } = rc
 
   console.log(`\n> Running steps for story: ${story.id}...`)
-  const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
+
+  const storyDir = resolve(resultsDir, 'happy-path', story.id)
+  await mkdir(storyDir, { recursive: true })
 
   const prompt = await buildStepsPrompt({
     projectDir: setupCtx.projectDir,
@@ -395,17 +364,13 @@ async function runSteps(rc: StoryRunContext): Promise<StoryResult> {
     featureNames: story.features,
   })
 
-  if (driverOptions.verbose) {
-    console.log('[prompt]\n' + prompt + '\n')
-  }
+  if (driverOptions.verbose) console.log('[prompt]\n' + prompt + '\n')
 
-  const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: tmp }, maxRetries)
+  const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: storyDir }, maxRetries)
 
-  const storyDir = resolve(resultsDir, 'happy-path', story.id)
-  await mkdir(storyDir, { recursive: true })
   await writeFile(resolve(storyDir, 'report.md'), result.rawOutput, 'utf-8')
   await writeReportJson(storyDir, story.id, null, result)
-  logArtifacts(await moveArtifacts(tmp, storyDir))
+  logArtifacts(await countArtifacts(storyDir))
 
   printFeatureResult(story.id, result)
   return { story, featureResults: [{ feature: 'steps', result }], overallPassed: result.passed }
@@ -417,6 +382,7 @@ async function runSteps(rc: StoryRunContext): Promise<StoryResult> {
 
 async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
   const { story, setupCtx, driverOptions, maxRetries, resultsDir } = rc
+
   const featureResults: FeatureResult[] = []
   const features = story.features ?? []
 
@@ -427,28 +393,24 @@ async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
 
   for (const feat of features) {
     console.log(`\n> Running feature: ${feat}...`)
-    const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
+
+    const featDir = resolve(resultsDir, 'feature-test', story.id, feat)
+    await mkdir(featDir, { recursive: true })
 
     const prompt = await buildFeaturePrompt({
       projectDir: setupCtx.projectDir,
       featureName: feat,
       baseUrl: setupCtx.baseUrl,
-      target: rc.target,
-      mode: story.mode,
     })
 
-    if (driverOptions.verbose) {
-      console.log('[prompt]\n' + prompt + '\n')
-    }
+    if (driverOptions.verbose) console.log('[prompt]\n' + prompt + '\n')
 
-    const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: tmp }, maxRetries)
+    const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: featDir }, maxRetries)
     featureResults.push({ feature: feat, result })
 
-    const featDir = resolve(resultsDir, 'feature-test', story.id, feat)
-    await mkdir(featDir, { recursive: true })
     await writeFile(resolve(featDir, 'report.md'), result.rawOutput, 'utf-8')
     await writeReportJson(featDir, story.id, feat, result)
-    logArtifacts(await moveArtifacts(tmp, featDir))
+    logArtifacts(await countArtifacts(featDir))
 
     printFeatureResult(feat, result)
   }
@@ -478,10 +440,9 @@ async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> {
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     console.log(`\n> [chaos-monkey] Round ${round}/${MAX_ROUNDS}...`)
-    const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
 
     // Two complementary mechanisms avoid redundant exploration:
-    // 1. Session resume (below) preserves browser state so the agent continues where it left off.
+    // 1. Session resume preserves browser state so the agent continues where it left off.
     // 2. Follow-up prompt lists already-found bugs so the agent skips known issues.
     const isFirstRound = round === 1
     const prompt = isFirstRound ? initialPrompt : buildChaosFollowUpPrompt(bugsFound)
@@ -490,25 +451,24 @@ async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> {
       console.log('[prompt]\n' + prompt + '\n')
     }
 
+    const roundDir = resolve(resultsDir, 'chaos-monkey', story.id, `round-${round}`)
+    await mkdir(roundDir, { recursive: true })
+
     let result: TestResult
     try {
       result = await runTest(prompt, {
         ...driverOptions,
-        outputDir: tmp,
+        outputDir: roundDir,
         sessionId: isFirstRound ? sessionId : undefined,
         resumeSessionId: isFirstRound ? undefined : sessionId,
       })
     } catch (err) {
       console.warn(`[chaos-monkey] Round ${round} error: ${err instanceof Error ? err.message : String(err)}`)
-      await rm(tmp, { recursive: true, force: true })
       break
     }
 
-    const roundDir = resolve(resultsDir, 'chaos-monkey', story.id, `round-${round}`)
-    await mkdir(roundDir, { recursive: true })
     await writeFile(resolve(roundDir, 'report.md'), result.rawOutput, 'utf-8')
     await writeReportJson(roundDir, story.id, `round-${round}`, result)
-    logArtifacts(await moveArtifacts(tmp, roundDir))
 
     const parsed = parseChaosOutput(result.rawOutput)
 
@@ -600,7 +560,7 @@ async function resolveRunDir(baseResultsDir: string, runId: string, append: bool
     return target
   }
   for (let i = 1; i <= 99; i++) {
-    const candidate = resolve(baseResultsDir, `${runId}(${i})`)
+    const candidate = resolve(baseResultsDir, `${runId}_${i}`)
     if (!existsSync(candidate)) {
       await mkdir(candidate, { recursive: true })
       return candidate

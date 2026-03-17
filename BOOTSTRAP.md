@@ -45,9 +45,6 @@ setup:                        # hook filenames (without extension) from hooks/
   - seed-db
 teardown:
   - cleanup-db
-tags:                         # for filtering with --tag
-  - smoke
-  - ci
 ```
 
 ### Three Test Modes
@@ -110,7 +107,7 @@ Reference hooks by filename (without extension) in your story's `setup` and `tea
 npx qagent run --project-dir ./<dir> --base-url http://localhost:3000
 ```
 
-Key flags: `--filter <pattern>`, `--tag <tag>`, `--retries <n>`, `--budget <usd>`, `--record`, `--verbose`.
+Key flags: `--filter <pattern>`, `--retries <n>`, `--budget <usd>`, `--record`, `--verbose`.
 
 ---
 
@@ -142,7 +139,6 @@ Create YAML story files in `stories/`:
 - A `smoke.yaml` with `happy-path` stories for critical flows (include explicit `steps`)
 - A `deep.yaml` with `feature-test` stories for thorough testing
 - Optionally a `chaos.yaml` with a `chaos-monkey` story for bug hunting
-- Use tags like `ci`, `smoke`, `nightly` for filtering
 
 ### Step 4: Generate Hooks (if needed)
 
@@ -161,7 +157,7 @@ If the app has quirks or you want custom role framing:
 Give the user ready-to-use commands:
 ```bash
 # Quick smoke test
-npx qagent run --project-dir ./<dir> --tag smoke --base-url <url>
+npx qagent run --project-dir ./<dir> --filter smoke --base-url <url>
 
 # Full test suite
 npx qagent run --project-dir ./<dir> --base-url <url> --retries 2
@@ -209,9 +205,6 @@ name: "Todo CRUD smoke test"
 mode: happy-path
 features:
   - todos
-tags:
-  - smoke
-  - ci
 steps: |
   1. Navigate to http://localhost:3000
   2. Verify the todo input field is visible
@@ -233,8 +226,6 @@ name: "Todo feature deep test"
 mode: feature-test
 features:
   - todos
-tags:
-  - nightly
 ```
 
 ### stories/chaos.yaml
@@ -243,18 +234,16 @@ tags:
 id: todo-chaos
 name: "Todo bug hunting"
 mode: chaos-monkey
-tags:
-  - chaos
 ```
 
 ### Run commands
 
 ```bash
 # CI smoke test
-npx qagent run --project-dir ./e2e --tag smoke --base-url http://localhost:3000
+npx qagent run --project-dir ./e2e --filter smoke --base-url http://localhost:3000
 
 # Deep nightly test
-npx qagent run --project-dir ./e2e --tag nightly --base-url http://localhost:3000 --retries 2
+npx qagent run --project-dir ./e2e --filter deep --base-url http://localhost:3000 --retries 2
 
 # Bug hunting session
 npx qagent run --project-dir ./e2e --filter chaos --base-url http://localhost:3000 --record

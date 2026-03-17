@@ -10,8 +10,9 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     }
   },
   "files": [
@@ -20,7 +21,7 @@
   ],
   "scripts": {
     "prepare": "npm run build",
-    "build": "tsc && cp src/prompt/system-prompt.md dist/prompt/system-prompt.md",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc && cp src/prompt/system-prompt.md dist/prompt/system-prompt.md",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
@@ -36,6 +37,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@playwright/mcp": "^0.0.68",
     "js-yaml": "^4.1.0",
     "tsx": "^4.19.0"
   },

@@ -16,6 +16,7 @@ export async function runHooks(
   hookNames: string[],
   ctx: SetupContext,
   label: string = 'hook',
+  afterEach?: () => void,
 ): Promise<void> {
   if (hookNames.length === 0) return
 
@@ -42,6 +43,7 @@ export async function runHooks(
         throw new Error(`Hook "${name}" does not export a default function`)
       }
       await fn(ctx)
+      afterEach?.()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       throw new Error(`[${label}] Hook "${name}" failed: ${msg}`)

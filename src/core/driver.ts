@@ -1,12 +1,14 @@
 /**
  * Claude Code CLI driver — spawns the `claude` CLI and captures output.
- * This is a thin wrapper; prompt construction lives in prompt-builder.ts.
+ * Prompt construction lives in prompt-builder.ts.
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { writeFile, unlink } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import type { DriverOptions, TestResult } from '../types.js'
 import { parseFeatureOutput } from '../prompt/output-parser.js'
 
@@ -30,11 +32,8 @@ export async function runTest(
     maxBudgetUsd = DEFAULT_MAX_BUDGET_USD,
   } = options
 
-  const effectiveSessionId = options.sessionId ?? randomUUID()
-
+  const sessionId = options.sessionId ?? randomUUID()
   const startTime = Date.now()
-
-  let systemPromptFile: string | undefined
 
   const mcpConfigPath = options.mcpConfigPath ?? await ensureDefaultMcpConfig(options.record, options.outputDir)
   const ownsMcpConfig = !options.mcpConfigPath
@@ -46,9 +45,10 @@ export async function runTest(
     '--max-budget-usd', String(maxBudgetUsd),
     '--mcp-config', mcpConfigPath,
     '--dangerously-skip-permissions',
-    '--session-id', effectiveSessionId,
+    '--session-id', sessionId,
   ]
 
+  let systemPromptFile: string | undefined
   if (resumeSessionId) {
     args.push('--resume', resumeSessionId)
   } else if (options.systemPrompt) {
@@ -57,15 +57,10 @@ export async function runTest(
     args.push('--system-prompt', systemPromptFile)
   }
 
-  if (maxTurns) {
-    args.push('--max-turns', String(maxTurns))
-  }
+  if (maxTurns) args.push('--max-turns', String(maxTurns))
 
   console.warn(`[driver] Running with --dangerously-skip-permissions (required for non-interactive automation)`)
-
-  if (options.mcpConfigPath) {
-    console.log(`[driver] MCP config: ${options.mcpConfigPath}`)
-  }
+  if (options.mcpConfigPath) console.log(`[driver] MCP config: ${options.mcpConfigPath}`)
   if (resumeSessionId) {
     console.log(`[driver] Resuming session ${resumeSessionId} (model: ${model})...`)
   } else {
@@ -83,9 +78,7 @@ export async function runTest(
       env: { ...process.env, DISABLE_INTERACTIVITY: '1' },
     })
 
-    if (proc.pid) {
-      console.log(`[driver] Process spawned, PID: ${proc.pid}`)
-    }
+    if (proc.pid) console.log(`[driver] Process spawned, PID: ${proc.pid}`)
 
     const timer = setTimeout(() => {
       killed = true
@@ -95,30 +88,21 @@ export async function runTest(
     }, timeoutMs)
 
     const activityCheck = setInterval(() => {
-      if (!proc.pid || proc.killed) {
-        clearInterval(activityCheck)
-        return
-      }
-      try {
-        process.kill(proc.pid, 0)
-      } catch {
-        clearInterval(activityCheck)
-        return
-      }
-      const elapsedMs = Date.now() - startTime
-      console.log(`[health] agent processing... (${Math.round(elapsedMs / 1000)}s)`)
+      if (!proc.pid || proc.killed) { clearInterval(activityCheck); return }
+      try { process.kill(proc.pid, 0) } catch { clearInterval(activityCheck); return }
+      console.log(`[health] agent processing... (${Math.round((Date.now() - startTime) / 1000)}s)`)
     }, 60000)
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stdout += text
-      if (verbose) process.stdout.write(text)
+      if (verbose) process.stderr.write(text)
     })
 
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stderr += text
-      console.log(`[driver][stderr] ${text.trimEnd()}`)
+      process.stderr.write(`[driver][stderr] ${text.trimEnd()}\n`)
     })
 
     const cleanup = () => {
@@ -130,7 +114,6 @@ export async function runTest(
     proc.on('error', (err) => {
       clearTimeout(timer)
       cleanup()
-      console.log(`[driver] SPAWN ERROR: ${err.message}`)
       reject(new Error(`Failed to spawn claude CLI: ${err.message}`))
     })
 
@@ -140,66 +123,39 @@ export async function runTest(
       const durationMs = Date.now() - startTime
       console.log(`[driver] Process exited with code ${code} after ${(durationMs / 1000).toFixed(1)}s`)
       console.log(`[driver] stdout: ${stdout.length} bytes, stderr: ${stderr.length} bytes`)
-      if (stderr && !verbose) {
-        console.log(`[driver] stderr tail: ${stderr.slice(-500)}`)
-      }
 
       if (killed) {
-        resolvePromise({
-          passed: false,
-          reason: `Timed out after ${Math.round(timeoutMs / 1000)}s`,
-          steps: [],
-          bugs: [],
-          rawOutput: stdout,
-          durationMs,
-          sessionId: effectiveSessionId,
-        })
+        resolvePromise({ passed: false, reason: `Timed out after ${Math.round(timeoutMs / 1000)}s`, steps: [], bugs: [], rawOutput: stdout, durationMs, sessionId })
         return
       }
 
       if (code !== 0 && !stdout.match(/\[TEST_PASS\]|\[TEST_FAIL\]|\[BUG_FOUND\]/)) {
-        resolvePromise({
-          passed: false,
-          reason: `claude CLI exited with code ${code}. stderr: ${stderr.slice(0, 500)}`,
-          steps: [],
-          bugs: [],
-          rawOutput: stdout,
-          durationMs,
-          sessionId: effectiveSessionId,
-        })
+        resolvePromise({ passed: false, reason: `claude CLI exited with code ${code}. stderr: ${stderr.slice(0, 500)}`, steps: [], bugs: [], rawOutput: stdout, durationMs, sessionId })
         return
       }
 
-      const parsed = parseFeatureOutput(stdout)
-      resolvePromise({
-        ...parsed,
-        rawOutput: stdout,
-        durationMs,
-        sessionId: effectiveSessionId,
-      })
+      resolvePromise({ ...parseFeatureOutput(stdout), rawOutput: stdout, durationMs, sessionId })
     })
   })
 }
 
 async function ensureDefaultMcpConfig(record?: boolean, outputDir?: string): Promise<string> {
-  const dir = outputDir ?? process.cwd()
-  const mcpArgs = ['@playwright/mcp@latest', `--output-dir=${dir}`]
-  if (record) {
-    mcpArgs.push('--save-video=1280x720')
-  }
+  const mcpArgs = [resolvePlaywrightMcpBin(), `--output-dir=${outputDir ?? process.cwd()}`]
+  if (record) mcpArgs.push('--save-video=1280x720')
 
-  const config = {
-    mcpServers: {
-      playwright: {
-        command: 'npx',
-        args: mcpArgs,
-      },
-    },
-  }
-
+  const config = { mcpServers: { playwright: { command: 'node', args: mcpArgs } } }
   const tmpPath = resolve(tmpdir(), `qagent-mcp-${randomUUID()}.json`)
   const configJson = JSON.stringify(config, null, 2)
   console.log(`[driver] MCP config:\n${configJson}`)
   await writeFile(tmpPath, configJson, 'utf-8')
   return tmpPath
+}
+
+function resolvePlaywrightMcpBin(): string {
+  const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+  const local = resolve(packageRoot, 'node_modules', '@playwright', 'mcp', 'cli.js')
+  if (existsSync(local)) return local
+  const hoisted = resolve(packageRoot, '..', '@playwright', 'mcp', 'cli.js')
+  if (existsSync(hoisted)) return hoisted
+  throw new Error('Cannot resolve @playwright/mcp/cli.js. Run "npm install" in qagent.')
 }

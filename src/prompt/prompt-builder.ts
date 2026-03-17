@@ -3,7 +3,6 @@ import { resolve, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { loadFeatureFile, loadAllFeatures } from '../loader/story-loader.js'
-import type { TestMode, TestTarget } from '../types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -50,7 +49,9 @@ Then continue with:
 [STEP] What you did first — result
 [STEP] What you did next — result
 
-Use [TEST_FAIL] if you found any bugs. Each marker must be on its own line. Do NOT reference screenshot filenames you invented — only reference what you actually see on screen.`
+Use [TEST_FAIL] if you found any bugs. Each marker must be on its own line. Do NOT reference screenshot filenames you invented — only reference what you actually see on screen.
+
+**IMPORTANT: You MUST write one [STEP] line for every step you executed, even if it passed. Do NOT summarise or skip steps. The runner cannot verify the test without them.**`
 
 const CHAOS_OUTPUT_INSTRUCTIONS = `
 ## Output
@@ -78,8 +79,6 @@ export interface FeaturePromptOptions {
   projectDir: string
   featureName: string
   baseUrl: string
-  target: TestTarget
-  mode: TestMode
   appName?: string
   contextHint?: string
 }
@@ -89,21 +88,14 @@ export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<st
     projectDir,
     featureName,
     baseUrl,
-    target,
     appName = 'the application',
     contextHint = '',
   } = opts
 
   const featureContent = await loadFeatureFile(projectDir, featureName)
-  const isElectron = target === 'electron'
 
-  const appDescription = isElectron
-    ? `a desktop Electron app called ${appName} (API at ${baseUrl})`
-    : `a web app called ${appName} at ${baseUrl}`
-
-  const navigationInstruction = isElectron
-    ? `The Electron app is already open. Take a screenshot to see the current state.`
-    : `Navigate to ${baseUrl}.`
+  const appDescription = `a web app called ${appName} at ${baseUrl}`
+  const navigationInstruction = `Navigate to ${baseUrl}.`
 
   const taskInstructions = `Test the following feature area thoroughly. The description below is a **hint and reference** — it tells you what exists and roughly how to find it, but it is NOT a rigid script. You should:
 

@@ -10,11 +10,9 @@ export { runHooks } from './loader/hook-loader.js'
 export { buildFeaturePrompt, buildStepsPrompt, buildChaosPrompt, buildSystemPrompt } from './prompt/prompt-builder.js'
 export { parseFeatureOutput, parseChaosOutput } from './prompt/output-parser.js'
 
-export { launchElectron, killElectron } from './platform/electron.js'
 
 export type {
   TestMode,
-  TestTarget,
   Story,
   SetupContext,
   SetupHookFn,

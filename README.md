@@ -173,7 +173,6 @@ qagent run [options]
 | `--verbose` | Show full agent output | `false` |
 | `--retries <n>` | Max retries per feature | `1` |
 | `--base-url <url>` | Application base URL | `http://localhost:3000` |
-| `--target <web\|electron>` | Test target platform | `web` |
 | `--model <model>` | Model to use | `sonnet` |
 | `--budget <usd>` | Per-test spending cap in USD | `5` |
 | `--project-dir <path>` | Path to project directory | `./qagent` |
@@ -235,14 +234,13 @@ results/
       login-smoke/
         report.md                  # raw agent output (human-readable)
         report.json                # structured result (machine-readable)
-        screenshots/               # captured during test
-        videos/                    # recorded sessions (if --record)
+        *.png / *.webm             # screenshots / videos written by MCP
     feature-test/
       dashboard-deep/
         dashboard/
           report.md
           report.json
-          screenshots/
+          *.png / *.webm
         settings/
           report.md
           report.json
@@ -251,7 +249,7 @@ results/
         round-1/
           report.md
           report.json
-          screenshots/
+          *.png / *.webm
 ```
 
 Each test produces three complementary files:
@@ -322,7 +320,6 @@ loadEnvFile(projectDir)
 const result = await run({
   projectDir,
   baseUrl: 'http://localhost:3000',
-  target: 'web',
   verbose: false,
   maxRetries: 2,
 })
