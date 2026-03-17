@@ -284,11 +284,15 @@ ANTHROPIC_API_KEY=sk-ant-...
 APP_SECRET=test-secret
 ```
 
+### Permissions
+
+QAgent runs the Claude CLI with `--dangerously-skip-permissions` to enable fully non-interactive automation. This means the agent can invoke any MCP tool without manual confirmation. By default only Playwright browser tools are available, but if you provide a custom `mcpConfigPath` with additional MCP servers, be aware that the agent will have unrestricted access to all of them.
+
 ### Budget Control
 
 Use `--budget <usd>` to set a per-test spending cap. Defaults:
 - `$5` per feature test / happy-path test
-- `$3` per chaos-monkey round
+- `$5` per chaos-monkey round
 
 ## Programmatic API
 

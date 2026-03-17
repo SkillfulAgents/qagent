@@ -59,6 +59,8 @@ export async function runTest(
     args.push('--max-turns', String(maxTurns))
   }
 
+  console.warn(`[driver] Running with --dangerously-skip-permissions (required for non-interactive automation)`)
+
   if (options.mcpConfigPath) {
     console.log(`[driver] MCP config: ${options.mcpConfigPath}`)
   }

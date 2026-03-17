@@ -185,7 +185,7 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   } = opts
 
   const BUDGET_FEATURE = budgetOverride ?? 5
-  const BUDGET_CHAOS = budgetOverride ?? 3
+  const BUDGET_CHAOS = budgetOverride ?? 5
 
   const runId = resolveRunId()
 
