@@ -1,54 +1,75 @@
 import { readFile, readdir } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import type { Story } from '../types.js'
 
+interface StoryWithPath {
+  story: Story
+  /** Path relative to stories/ dir, e.g. "detailed/core.yaml" */
+  relPath: string
+}
+
+async function findYamlFiles(dir: string, base: string = dir): Promise<{ full: string; rel: string }[]> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const files: { full: string; rel: string }[] = []
+  for (const entry of entries) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...await findYamlFiles(full, base))
+    } else if (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml')) {
+      const rel = full.slice(base.length + 1)
+      files.push({ full, rel })
+    }
+  }
+  return files.sort((a, b) => a.rel.localeCompare(b.rel))
+}
+
 /**
- * Loads stories from `<projectDir>/stories/*.yaml`.
- * Optionally filters by id/name substring and tag.
+ * Loads stories from `<projectDir>/stories/` recursively.
+ *
+ * --filter matches against story id, name, or file path relative to stories/.
+ * E.g. `--filter detailed` matches all stories under `stories/detailed/`.
  */
 export async function loadStories(
   projectDir: string,
   filter?: string,
-  tag?: string,
 ): Promise<Story[]> {
   const storiesDir = resolve(projectDir, 'stories')
   if (!existsSync(storiesDir)) {
     throw new Error(`Stories directory not found: ${storiesDir}`)
   }
 
-  const files = (await readdir(storiesDir)).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml')).sort()
+  const files = await findYamlFiles(storiesDir)
 
   if (files.length === 0) {
     throw new Error(`No story files found in ${storiesDir}`)
   }
 
-  let stories: Story[] = []
+  let loaded: StoryWithPath[] = []
 
-  for (const file of files) {
-    const raw = await readFile(resolve(storiesDir, file), 'utf-8')
+  for (const { full, rel } of files) {
+    const raw = await readFile(full, 'utf-8')
     const docs = yaml.loadAll(raw) as Story[]
     for (const doc of docs) {
       if (doc && typeof doc === 'object' && doc.id) {
         if (!doc.mode) doc.mode = 'feature-test'
-        stories.push(doc)
+        loaded.push({ story: doc, relPath: rel })
       }
     }
   }
 
   if (filter) {
     const pattern = filter.toLowerCase()
-    stories = stories.filter(
-      (s) => s.id.toLowerCase().includes(pattern) || s.name.toLowerCase().includes(pattern),
+    loaded = loaded.filter(
+      ({ story, relPath }) =>
+        story.id.toLowerCase().includes(pattern) ||
+        story.name.toLowerCase().includes(pattern) ||
+        relPath.toLowerCase().includes(pattern),
     )
   }
 
-  if (tag) {
-    stories = stories.filter((s) => s.tags?.includes(tag))
-  }
-
-  return stories
+  return loaded.map(({ story }) => story)
 }
 
 /**

@@ -23,6 +23,10 @@ export type {
   RunOptions,
   FeatureResult,
   StoryResult,
+  StoryRunContext,
+  ReportJson,
+  SummaryFeatureEntry,
+  SummaryStoryEntry,
   SuiteResult,
   CostInfo,
 } from './types.js'

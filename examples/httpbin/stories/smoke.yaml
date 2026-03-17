@@ -1,0 +1,14 @@
+id: httpbin-smoke
+name: "httpbin smoke test with setup hook"
+mode: happy-path
+baseUrl: https://httpbin.org
+features:
+  - api-endpoints
+setup:
+  - fetch-uuid
+steps: |
+  1. Navigate to https://httpbin.org. Verify the page loads and the Swagger UI or httpbin heading is visible. Take a screenshot.
+
+  2. Navigate to https://httpbin.org/get. Verify the JSON response is displayed on the page, containing "origin" and "headers" fields. Take a screenshot.
+
+  3. Navigate to https://httpbin.org/uuid. Verify a JSON response with a "uuid" field is shown.

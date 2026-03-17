@@ -1,0 +1,9 @@
+id: example-com-smoke
+name: "Example.com smoke test"
+mode: happy-path
+steps: |
+  1. Navigate to https://example.com. Verify the page loads and the heading "Example Domain" is visible. Take a screenshot.
+
+  2. Verify there is a paragraph of text and a link labeled "More information..." on the page.
+
+  3. Click the "More information..." link. Verify the browser navigated away from example.com. Take a screenshot.

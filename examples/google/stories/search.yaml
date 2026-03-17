@@ -3,15 +3,15 @@ name: "Google Search happy path"
 mode: happy-path
 features:
   - search
-tags:
-  - smoke
-  - ci
 steps: |
-  1. Navigate to https://www.google.com
-  2. Verify the search bar is visible
-  3. Type "kiwi fruit" into the search bar
-  4. Press Enter
-  5. Verify search results appear on the page
-  6. Verify the query "kiwi fruit" is shown in the search bar
-  7. Click on the first search result link
-  8. Verify the browser navigated to a new page
+  1. Navigate to https://www.google.com. Verify the Google logo and the search bar (combobox) are visible. Take a screenshot.
+
+  2. Click the search bar and type "kiwi fruit". Verify autocomplete suggestions appear below the input.
+
+  3. Press Enter to submit the search.
+
+  4. Verify the search results page loads: the search bar should show "kiwi fruit", and a list of organic results should be visible. Take a screenshot.
+
+  5. Click the first organic search result link.
+
+  6. Verify the browser navigated to a new page (the URL should no longer be google.com). Take a screenshot.

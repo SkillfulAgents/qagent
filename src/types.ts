@@ -17,9 +17,10 @@ export interface Story {
   features?: string[]
   /** Exact steps for happy-path mode (multiline string, ignored in other modes). */
   steps?: string
+  /** Override the CLI --base-url for this story. */
+  baseUrl?: string
   setup?: string[]
   teardown?: string[]
-  tags?: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +82,6 @@ export interface DriverOptions {
 
 export interface RunOptions {
   filter?: string
-  tag?: string
   verbose: boolean
   maxRetries: number
   baseUrl: string
@@ -93,14 +93,25 @@ export interface RunOptions {
   record?: boolean
   /** Append to existing run results instead of overwriting (adds numeric suffix). */
   append?: boolean
-  /** Skip cleanup of temp screenshots, videos, and JSONL files after run. */
-  noClean?: boolean
   /** Upload results to GitHub Artifacts after run. */
   upload?: boolean
 }
 
 // ---------------------------------------------------------------------------
-// Results
+// Story run context — everything needed to execute a single story
+// ---------------------------------------------------------------------------
+
+export interface StoryRunContext {
+  story: Story
+  setupCtx: SetupContext
+  driverOptions: DriverOptions
+  target: TestTarget
+  maxRetries: number
+  resultsDir: string
+}
+
+// ---------------------------------------------------------------------------
+// Results (internal — used during the run)
 // ---------------------------------------------------------------------------
 
 export interface FeatureResult {
@@ -114,10 +125,50 @@ export interface StoryResult {
   overallPassed: boolean
 }
 
+// ---------------------------------------------------------------------------
+// report.json — per-feature structured result (written next to report.md)
+// ---------------------------------------------------------------------------
+
+export interface ReportJson {
+  storyId: string
+  /** Only present for feature-test and chaos-monkey modes. */
+  feature?: string
+  passed: boolean
+  reason: string
+  steps: string[]
+  bugs: string[]
+  durationMs: number
+  sessionId?: string
+  cost?: CostInfo
+}
+
+// ---------------------------------------------------------------------------
+// summary.json — lightweight navigation index (one per run)
+// ---------------------------------------------------------------------------
+
+export interface SummaryFeatureEntry {
+  feature: string
+  passed: boolean
+  reportPath: string
+}
+
+export interface SummaryStoryEntry {
+  storyId: string
+  storyName: string
+  mode: TestMode
+  passed: boolean
+  durationSec: number
+  costUsd: number
+  /** happy-path / chaos-monkey: single report path. */
+  reportPath?: string
+  /** feature-test: per-feature results. */
+  features?: SummaryFeatureEntry[]
+}
+
 export interface SuiteResult {
   startedAt: string
   finishedAt: string
-  totalDurationMs: number
+  totalDurationSec: number
   totalStories: number
   passedStories: number
   failedStories: number
@@ -125,5 +176,5 @@ export interface SuiteResult {
   passedFeatures: number
   failedFeatures: number
   totalCostUsd: number
-  results: StoryResult[]
+  results: SummaryStoryEntry[]
 }

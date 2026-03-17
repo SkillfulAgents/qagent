@@ -18,6 +18,8 @@ export interface ElectronLaunchOptions {
   env?: Record<string, string>
   /** Regex to extract the API port from stdout. Must have a capture group for the port number. */
   apiPortPattern?: RegExp
+  /** Path to poll for API readiness (default: "/api/settings"). */
+  apiHealthPath?: string
   /** Timeout in ms to wait for CDP + API readiness. */
   timeoutMs?: number
 }
@@ -90,7 +92,7 @@ export async function launchElectron(opts: ElectronLaunchOptions): Promise<Elect
   console.log(`  [electron] CDP endpoint ready: ${cdpEndpoint}`)
   console.log(`  [electron] API server port: ${apiPort}`)
 
-  await waitForApi(apiPort, timeoutMs)
+  await waitForApi(apiPort, opts.apiHealthPath ?? '/api/settings', timeoutMs)
   console.log(`  [electron] API is ready`)
 
   const mcpConfigPath = await writeCdpMcpConfig(cdpEndpoint)
@@ -145,9 +147,9 @@ async function waitForCdp(port: number, timeoutMs: number): Promise<string> {
   throw new Error(`CDP endpoint not available on port ${port} after ${timeoutMs}ms`)
 }
 
-async function waitForApi(port: number, timeoutMs: number): Promise<void> {
+async function waitForApi(port: number, healthPath: string, timeoutMs: number): Promise<void> {
   const start = Date.now()
-  const url = `http://localhost:${port}/api/settings`
+  const url = `http://localhost:${port}${healthPath}`
 
   while (Date.now() - start < timeoutMs) {
     try {

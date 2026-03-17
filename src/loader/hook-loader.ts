@@ -6,6 +6,8 @@ import type { SetupContext, SetupHookFn } from '../types.js'
  * Dynamically imports and runs hooks from the consumer's `hooks/` directory.
  * Each hook file must export a default async function.
  *
+ * TypeScript support: the CLI runs under tsx, so .ts files are natively importable.
+ *
  * Hook resolution order:
  *   1. <projectDir>/hooks/<name>.ts
  *   2. <projectDir>/hooks/<name>.js

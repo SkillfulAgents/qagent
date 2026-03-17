@@ -3,7 +3,7 @@
  * CLI entry point for qagent.
  *
  * Usage:
- *   npx qagent run [--filter <pattern>] [--tag <tag>] [--verbose]
+ *   npx qagent run [--filter <pattern>] [--verbose]
  *                   [--retries <n>] [--base-url <url>] [--target web|electron]
  *                   [--model <model>] [--budget <usd>] [--project-dir <path>]
  */
@@ -19,8 +19,7 @@ Usage:
   qagent run [options]
 
 Options:
-  --filter <pattern>      Filter stories by id or name (substring match)
-  --tag <tag>             Filter stories by tag
+  --filter <pattern>      Filter stories by id, name, or path (substring match)
   --verbose               Show full agent output
   --retries <n>           Max retries per feature (default: 1)
   --base-url <url>        Application base URL (default: http://localhost:3000)
@@ -30,7 +29,6 @@ Options:
   --project-dir <path>    Path to the qagent project directory
   --record                Record video of browser sessions
   --append                Append results instead of overwriting same run ID
-  --no-clean              Skip cleanup of temp screenshots/videos/JSONL after run
   --upload                Upload results to GitHub Artifacts (requires GITHUB_ACTIONS env)
   --help                  Show this help message
 `)
@@ -41,7 +39,6 @@ function parseArgs(): { command: string; options: RunOptions } {
   const command = args[0] ?? 'run'
 
   let filter: string | undefined
-  let tag: string | undefined
   let verbose = false
   let maxRetries = 1
   let baseUrl = 'http://localhost:3000'
@@ -51,16 +48,12 @@ function parseArgs(): { command: string; options: RunOptions } {
   let projectDirArg: string | undefined
   let record = false
   let append = false
-  let noClean = false
   let upload = false
 
   for (let i = 1; i < args.length; i++) {
     switch (args[i]) {
       case '--filter':
         filter = args[++i]
-        break
-      case '--tag':
-        tag = args[++i]
         break
       case '--verbose':
         verbose = true
@@ -93,9 +86,6 @@ function parseArgs(): { command: string; options: RunOptions } {
       case '--append':
         append = true
         break
-      case '--no-clean':
-        noClean = true
-        break
       case '--upload':
         upload = true
         break
@@ -110,7 +100,7 @@ function parseArgs(): { command: string; options: RunOptions } {
 
   return {
     command,
-    options: { filter, tag, verbose, maxRetries, baseUrl, target, model, budgetOverride, projectDir, record, append, noClean, upload },
+    options: { filter, verbose, maxRetries, baseUrl, target, model, budgetOverride, projectDir, record, append, upload },
   }
 }
 

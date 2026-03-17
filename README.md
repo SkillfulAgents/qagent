@@ -57,9 +57,11 @@ Create a project directory (defaults to `./qagent` or use `--project-dir`):
 
 ```
 my-tests/
-  stories/                      # required: YAML test stories
+  stories/                      # required: YAML test stories (recursive)
     smoke.yaml
-    deep.yaml
+    detailed/                   # subdirectories for organization
+      core.yaml
+      integrations.yaml
   features/                     # optional: feature spec markdown files
     login.md
     dashboard.md
@@ -69,9 +71,16 @@ my-tests/
   .env.local                    # optional: loaded into process.env
 ```
 
+Stories are loaded recursively from `stories/`. Use subdirectories to organize tests — then filter by path:
+
+```bash
+# Run all stories under stories/detailed/
+npx qagent run --project-dir ./my-tests --filter detailed/
+```
+
 ## Story Format
 
-Stories are YAML files in `stories/`. Each file can contain one or multiple YAML documents.
+Stories are YAML files in `stories/` (scanned recursively). Each file can contain one or multiple YAML documents.
 
 ### Fields
 
@@ -82,9 +91,9 @@ Stories are YAML files in `stories/`. Each file can contain one or multiple YAML
 | `mode` | string | no | `happy-path` \| `feature-test` \| `chaos-monkey` (default: `feature-test`) |
 | `features` | string[] | no | Feature names (map to `features/<name>.md`) |
 | `steps` | string | no | Explicit steps for `happy-path` mode (multiline) |
+| `baseUrl` | string | no | Override the CLI `--base-url` for this story |
 | `setup` | string[] | no | Hook names to run before the test (from `hooks/`) |
 | `teardown` | string[] | no | Hook names to run after the test (from `hooks/`) |
-| `tags` | string[] | no | Tags for filtering (`--tag`) |
 
 ### Example: happy-path
 
@@ -115,8 +124,6 @@ setup:
   - seed-db
 teardown:
   - cleanup-db
-tags:
-  - nightly
 ```
 
 ### Example: chaos-monkey
@@ -125,8 +132,6 @@ tags:
 id: chaos-hunt
 name: "Bug hunting session"
 mode: chaos-monkey
-tags:
-  - chaos
 ```
 
 ## Test Modes
@@ -164,18 +169,16 @@ qagent run [options]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--filter <pattern>` | Filter stories by id or name (substring) | — |
-| `--tag <tag>` | Filter stories by tag | — |
+| `--filter <pattern>` | Filter stories by id, name, or path (substring) | — |
 | `--verbose` | Show full agent output | `false` |
 | `--retries <n>` | Max retries per feature | `1` |
 | `--base-url <url>` | Application base URL | `http://localhost:3000` |
 | `--target <web\|electron>` | Test target platform | `web` |
 | `--model <model>` | Model to use | `sonnet` |
-| `--budget <usd>` | Per-test spending cap in USD | `5` (feature), `3` (chaos) |
+| `--budget <usd>` | Per-test spending cap in USD | `5` |
 | `--project-dir <path>` | Path to project directory | `./qagent` |
 | `--record` | Record video of browser sessions | `false` |
 | `--append` | Append results instead of overwriting | `false` |
-| `--no-clean` | Skip cleanup of temp artifacts | `false` |
 | `--upload` | Upload results to GitHub Artifacts | `false` |
 
 ## Hooks
@@ -227,27 +230,37 @@ After a run, results are written to `<project-dir>/results/<run-id>/`:
 ```
 results/
   commit_abc1234/                  # run ID (from git/CI or timestamp)
-    summary.json                   # machine-readable suite result
+    summary.json                   # navigation index (pass/fail, paths, cost)
     happy-path/
       login-smoke/
-        report.md                  # raw agent output
+        report.md                  # raw agent output (human-readable)
+        report.json                # structured result (machine-readable)
         screenshots/               # captured during test
         videos/                    # recorded sessions (if --record)
     feature-test/
       dashboard-deep/
         dashboard/
           report.md
+          report.json
           screenshots/
         settings/
           report.md
+          report.json
     chaos-monkey/
       chaos-hunt/
         round-1/
           report.md
+          report.json
           screenshots/
 ```
 
-The `summary.json` contains pass/fail counts, duration, cost breakdown, and per-story/per-feature results.
+Each test produces three complementary files:
+
+| File | Purpose | Consumer |
+|------|---------|----------|
+| `summary.json` | Lightweight index: lists all stories/features with pass/fail, duration (seconds), cost, and `reportPath` pointers | CI dashboards, scripts |
+| `report.json` | Full structured result for one test: steps, bugs, reason, cost, sessionId | Programmatic analysis, diff |
+| `report.md` | Raw agent output with full context | Human debugging, review |
 
 Run IDs are derived automatically:
 - **CI pull request:** `pr-123_base123_head456`
@@ -296,9 +309,7 @@ QAgent runs the Claude CLI with `--dangerously-skip-permissions` to enable fully
 
 ### Budget Control
 
-Use `--budget <usd>` to set a per-test spending cap. Defaults:
-- `$5` per feature test / happy-path test
-- `$5` per chaos-monkey round
+Use `--budget <usd>` to set a per-test spending cap (default: `$5`).
 
 ## Programmatic API
 
@@ -323,7 +334,3 @@ process.exit(result.failedStories > 0 ? 1 : 0)
 ## Bootstrap with AI
 
 Don't want to write stories and feature specs by hand? Copy the contents of [`BOOTSTRAP.md`](./BOOTSTRAP.md) into your favorite AI assistant (Claude, GPT, Gemini, etc.), describe your application, and it will generate a complete qagent test configuration for you.
-
-## License
-
-MIT

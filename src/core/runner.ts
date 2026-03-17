@@ -3,6 +3,7 @@
  * Loads stories, runs setup hooks, builds prompts, invokes the driver, collects results.
  */
 import { mkdir, writeFile, readdir, rename, rm, mkdtemp } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -14,7 +15,11 @@ import type {
   DriverOptions,
   FeatureResult,
   StoryResult,
+  StoryRunContext,
   SuiteResult,
+  ReportJson,
+  SummaryStoryEntry,
+  SummaryFeatureEntry,
 } from '../types.js'
 import { loadStories } from '../loader/story-loader.js'
 import { runHooks } from '../loader/hook-loader.js'
@@ -146,6 +151,89 @@ function printFeatureResult(feature: string, result: TestResult) {
   }
 }
 
+function logArtifacts(artifacts: { screenshots: string[]; videos: string[] }) {
+  if (artifacts.screenshots.length > 0) {
+    console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
+  }
+  if (artifacts.videos.length > 0) {
+    console.log(`  [videos] ${artifacts.videos.length} saved`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Build StoryRunContext — centralises all per-story config resolution
+// ---------------------------------------------------------------------------
+
+function buildStoryRunContext(
+  story: Story,
+  opts: RunOptions,
+  systemPrompt: string,
+  resultsDir: string,
+  budget: number,
+): StoryRunContext {
+  const effectiveBaseUrl = story.baseUrl ?? opts.baseUrl
+
+  const setupCtx: SetupContext = {
+    baseUrl: effectiveBaseUrl,
+    env: process.env as Record<string, string | undefined>,
+    store: new Map(),
+    projectDir: opts.projectDir,
+  }
+
+  const driverOptions: DriverOptions = {
+    verbose: opts.verbose,
+    model: opts.model,
+    systemPrompt,
+    maxBudgetUsd: budget,
+    record: opts.record,
+  }
+
+  return {
+    story,
+    setupCtx,
+    driverOptions,
+    target: opts.target,
+    maxRetries: opts.maxRetries,
+    resultsDir,
+  }
+}
+
+/**
+ * After setup hooks run, pull well-known keys from store into driverOptions.
+ * This is how hooks like launch-electron feed config back into the runner.
+ */
+function applyStoreOverrides(rc: StoryRunContext): void {
+  const { store } = rc.setupCtx
+  if (store.has('mcpConfigPath')) {
+    rc.driverOptions.mcpConfigPath = store.get('mcpConfigPath') as string
+  }
+  if (store.has('electronBaseUrl')) {
+    rc.setupCtx.baseUrl = store.get('electronBaseUrl') as string
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch — route to the right mode handler
+// ---------------------------------------------------------------------------
+
+async function dispatchStory(rc: StoryRunContext): Promise<StoryResult> {
+  const { story } = rc
+
+  switch (story.mode) {
+    case 'chaos-monkey':
+      return runChaosMonkey(rc)
+    case 'happy-path':
+      if (!story.steps) {
+        throw new Error(`Story "${story.id}" is mode: happy-path but has no "steps" field.`)
+      }
+      return runSteps(rc)
+    case 'feature-test':
+      return runFeatures(rc)
+    default:
+      throw new Error(`Story "${story.id}" has unknown mode: ${story.mode}`)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main run function
 // ---------------------------------------------------------------------------
@@ -153,36 +241,30 @@ function printFeatureResult(feature: string, result: TestResult) {
 export async function run(opts: RunOptions): Promise<SuiteResult> {
   const {
     filter,
-    tag,
     verbose,
-    maxRetries,
     baseUrl,
-    target,
-    model,
     budgetOverride,
     projectDir,
     record,
     append = false,
-    noClean = false,
     upload = false,
   } = opts
 
-  const BUDGET_FEATURE = budgetOverride ?? 5
-  const BUDGET_CHAOS = budgetOverride ?? 5
+  const budget = budgetOverride ?? 5
 
   const runId = resolveRunId()
 
   console.log('=== QAgent Test Runner ===\n')
   console.log(`Project dir: ${projectDir}`)
   console.log(`Run ID:      ${runId}`)
-  console.log(`Target:      ${target}`)
+  console.log(`Target:      ${opts.target}`)
   if (record) console.log(`Record:      enabled`)
   console.log(`Base URL:    ${baseUrl}`)
-  console.log(`Max retries: ${maxRetries}`)
+  console.log(`Max retries: ${opts.maxRetries}`)
   console.log(`Verbose:     ${verbose}`)
-  console.log(`Budget:      feature=$${BUDGET_FEATURE}, chaos=$${BUDGET_CHAOS}\n`)
+  console.log(`Budget:      $${budget}/test\n`)
 
-  const stories = await loadStories(projectDir, filter, tag)
+  const stories = await loadStories(projectDir, filter)
 
   if (stories.length === 0) {
     console.log('No stories match the given filters.')
@@ -197,7 +279,6 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
 
   const systemPrompt = await buildSystemPrompt(projectDir)
 
-  // Resolve resultsDir with runId, handling overwrite vs append
   const baseResultsDir = resolve(projectDir, 'results')
   const resultsDir = await resolveRunDir(baseResultsDir, runId, append)
 
@@ -209,18 +290,13 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
     console.log(`> [${story.id}] ${story.name} (${story.mode})`)
     console.log(`${'─'.repeat(60)}`)
 
-    const ctx: SetupContext = {
-      baseUrl,
-      env: process.env as Record<string, string | undefined>,
-      store: new Map(),
-      projectDir,
-    }
+    const rc = buildStoryRunContext(story, opts, systemPrompt, resultsDir, budget)
 
     // --- Setup hooks ---
     if (story.setup && story.setup.length > 0) {
       console.log(`\n[setup] ${story.setup.join(', ')}`)
       try {
-        await runHooks(story.setup, ctx, 'setup')
+        await runHooks(story.setup, rc.setupCtx, 'setup')
       } catch (err) {
         const reason = `Setup failed: ${err instanceof Error ? err.message : String(err)}`
         console.error(`[setup] ${reason}`)
@@ -229,29 +305,17 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
       }
     }
 
-    const driverOptions: DriverOptions = {
-      verbose,
-      model,
-      systemPrompt,
-      maxBudgetUsd: story.mode === 'chaos-monkey' ? BUDGET_CHAOS : BUDGET_FEATURE,
-      record,
-    }
+    // Hooks may inject driver-level config into store (e.g. launch-electron sets mcpConfigPath).
+    applyStoreOverrides(rc)
 
-    if (story.mode === 'chaos-monkey') {
-      await runChaosMonkey(story, ctx, driverOptions, resultsDir, allResults)
-    } else if (story.mode === 'happy-path' && story.steps) {
-      await runSteps(story, ctx, driverOptions, maxRetries, resultsDir, allResults)
-    } else {
-      if (story.mode === 'happy-path') {
-        console.warn(`[warn] Story "${story.id}" is happy-path but has no steps, falling back to feature-test mode.`)
-      }
-      await runFeatures(story, ctx, driverOptions, maxRetries, resultsDir, allResults)
-    }
+    const result = await dispatchStory(rc)
+    allResults.push(result)
 
+    // --- Teardown hooks ---
     if (story.teardown && story.teardown.length > 0) {
       console.log(`\n[teardown] ${story.teardown.join(', ')}`)
       try {
-        await runHooks(story.teardown, ctx, 'teardown')
+        await runHooks(story.teardown, rc.setupCtx, 'teardown')
       } catch (err) {
         console.warn(`[teardown] Warning: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -260,38 +324,53 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
 
   // --- Summary ---
   const suiteEnd = Date.now()
-  const totalDurationMs = suiteEnd - suiteStart
+  const totalDurationSec = round2((suiteEnd - suiteStart) / 1000)
 
   const allFeatureResults = allResults.flatMap((r) => r.featureResults)
   const totalCostUsd = allFeatureResults.reduce((sum, fr) => sum + (fr.result.cost?.totalCostUsd ?? 0), 0)
+
+  const summaryResults: SummaryStoryEntry[] = allResults.map((r) => {
+    const storyCost = r.featureResults.reduce((s, fr) => s + (fr.result.cost?.totalCostUsd ?? 0), 0)
+    const storyDuration = r.featureResults.reduce((s, fr) => s + fr.result.durationMs, 0)
+    const base: SummaryStoryEntry = {
+      storyId: r.story.id,
+      storyName: r.story.name,
+      mode: r.story.mode,
+      passed: r.overallPassed,
+      durationSec: round2(storyDuration / 1000),
+      costUsd: round2(storyCost),
+    }
+    if (r.story.mode === 'feature-test') {
+      base.features = r.featureResults.map((fr): SummaryFeatureEntry => ({
+        feature: fr.feature,
+        passed: fr.result.passed,
+        reportPath: reportRelPath(r.story.mode, r.story.id, fr.feature),
+      }))
+    } else if (r.featureResults.length > 0) {
+      base.reportPath = reportRelPath(r.story.mode, r.story.id, r.featureResults[0].feature)
+    }
+    return base
+  })
+
   const summary: SuiteResult = {
     startedAt: new Date(suiteStart).toISOString(),
     finishedAt: new Date(suiteEnd).toISOString(),
-    totalDurationMs,
+    totalDurationSec,
     totalStories: allResults.length,
     passedStories: allResults.filter((r) => r.overallPassed).length,
     failedStories: allResults.filter((r) => !r.overallPassed).length,
     totalFeatures: allFeatureResults.length,
     passedFeatures: allFeatureResults.filter((fr) => fr.result.passed).length,
     failedFeatures: allFeatureResults.filter((fr) => !fr.result.passed).length,
-    totalCostUsd: Math.round(totalCostUsd * 1_000_000) / 1_000_000,
-    results: allResults.map((r) => ({
-      ...r,
-      featureResults: r.featureResults.map((fr) => ({
-        ...fr,
-        result: {
-          ...fr.result,
-          rawOutput: storyReportRef(r.story.mode, r.story.id, fr.feature),
-        },
-      })),
-    })),
+    totalCostUsd: round2(totalCostUsd),
+    results: summaryResults,
   }
 
   const summaryPath = resolve(resultsDir, 'summary.json')
   await writeFile(summaryPath, JSON.stringify(summary, null, 2), 'utf-8')
 
-  printSummary(summary, allResults, summaryPath, totalDurationMs)
-  await printResultsTree(resultsDir)
+  printSummary(summary, allResults, summaryPath, totalDurationSec)
+  printResultsTree(resultsDir, summaryResults)
 
   if (upload) {
     await uploadArtifacts(resultsDir, runId)
@@ -304,19 +383,14 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
 // Mode: happy-path with explicit steps
 // ---------------------------------------------------------------------------
 
-async function runSteps(
-  story: Story,
-  ctx: SetupContext,
-  driverOptions: DriverOptions,
-  maxRetries: number,
-  resultsDir: string,
-  allResults: StoryResult[],
-): Promise<void> {
+async function runSteps(rc: StoryRunContext): Promise<StoryResult> {
+  const { story, setupCtx, driverOptions, maxRetries, resultsDir } = rc
+
   console.log(`\n> Running steps for story: ${story.id}...`)
   const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
 
   const prompt = await buildStepsPrompt({
-    projectDir: ctx.projectDir,
+    projectDir: setupCtx.projectDir,
     steps: story.steps!,
     featureNames: story.features,
   })
@@ -330,38 +404,25 @@ async function runSteps(
   const storyDir = resolve(resultsDir, 'happy-path', story.id)
   await mkdir(storyDir, { recursive: true })
   await writeFile(resolve(storyDir, 'report.md'), result.rawOutput, 'utf-8')
-
-  const artifacts = await moveArtifacts(tmp, storyDir)
-  if (artifacts.screenshots.length > 0) {
-    console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
-  }
-  if (artifacts.videos.length > 0) {
-    console.log(`  [videos] ${artifacts.videos.length} saved`)
-  }
+  await writeReportJson(storyDir, story.id, null, result)
+  logArtifacts(await moveArtifacts(tmp, storyDir))
 
   printFeatureResult(story.id, result)
-  allResults.push({ story, featureResults: [{ feature: 'steps', result }], overallPassed: result.passed })
+  return { story, featureResults: [{ feature: 'steps', result }], overallPassed: result.passed }
 }
 
 // ---------------------------------------------------------------------------
 // Mode: feature-test (per-feature loop)
 // ---------------------------------------------------------------------------
 
-async function runFeatures(
-  story: Story,
-  ctx: SetupContext,
-  driverOptions: DriverOptions,
-  maxRetries: number,
-  resultsDir: string,
-  allResults: StoryResult[],
-): Promise<void> {
+async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
+  const { story, setupCtx, driverOptions, maxRetries, resultsDir } = rc
   const featureResults: FeatureResult[] = []
   const features = story.features ?? []
 
   if (features.length === 0) {
     console.warn(`[warn] Story "${story.id}" has no features defined, skipping.`)
-    allResults.push({ story, featureResults: [], overallPassed: true })
-    return
+    return { story, featureResults: [], overallPassed: true }
   }
 
   for (const feat of features) {
@@ -369,10 +430,10 @@ async function runFeatures(
     const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
 
     const prompt = await buildFeaturePrompt({
-      projectDir: ctx.projectDir,
+      projectDir: setupCtx.projectDir,
       featureName: feat,
-      baseUrl: ctx.baseUrl,
-      target: driverOptions.mcpConfigPath ? 'electron' : 'web',
+      baseUrl: setupCtx.baseUrl,
+      target: rc.target,
       mode: story.mode,
     })
 
@@ -386,33 +447,22 @@ async function runFeatures(
     const featDir = resolve(resultsDir, 'feature-test', story.id, feat)
     await mkdir(featDir, { recursive: true })
     await writeFile(resolve(featDir, 'report.md'), result.rawOutput, 'utf-8')
-
-    const artifacts = await moveArtifacts(tmp, featDir)
-    if (artifacts.screenshots.length > 0) {
-      console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
-    }
-    if (artifacts.videos.length > 0) {
-      console.log(`  [videos] ${artifacts.videos.length} saved`)
-    }
+    await writeReportJson(featDir, story.id, feat, result)
+    logArtifacts(await moveArtifacts(tmp, featDir))
 
     printFeatureResult(feat, result)
   }
 
   const overallPassed = featureResults.length > 0 && featureResults.every((fr) => fr.result.passed)
-  allResults.push({ story, featureResults, overallPassed })
+  return { story, featureResults, overallPassed }
 }
 
 // ---------------------------------------------------------------------------
 // Mode: chaos-monkey
 // ---------------------------------------------------------------------------
 
-async function runChaosMonkey(
-  story: Story,
-  ctx: SetupContext,
-  driverOptions: DriverOptions,
-  resultsDir: string,
-  allResults: StoryResult[],
-): Promise<void> {
+async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> {
+  const { story, setupCtx, driverOptions, resultsDir } = rc
   const MAX_ROUNDS = 100
   const bugsFound: string[] = []
   const chaosResults: FeatureResult[] = []
@@ -422,14 +472,17 @@ async function runChaosMonkey(
   console.log(`[chaos-monkey] Session: ${sessionId}`)
 
   const initialPrompt = await buildChaosPrompt({
-    projectDir: ctx.projectDir,
-    baseUrl: ctx.baseUrl,
+    projectDir: setupCtx.projectDir,
+    baseUrl: setupCtx.baseUrl,
   })
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     console.log(`\n> [chaos-monkey] Round ${round}/${MAX_ROUNDS}...`)
     const tmp = await mkdtemp(join(tmpdir(), 'qagent-'))
 
+    // Two complementary mechanisms avoid redundant exploration:
+    // 1. Session resume (below) preserves browser state so the agent continues where it left off.
+    // 2. Follow-up prompt lists already-found bugs so the agent skips known issues.
     const isFirstRound = round === 1
     const prompt = isFirstRound ? initialPrompt : buildChaosFollowUpPrompt(bugsFound)
 
@@ -454,14 +507,8 @@ async function runChaosMonkey(
     const roundDir = resolve(resultsDir, 'chaos-monkey', story.id, `round-${round}`)
     await mkdir(roundDir, { recursive: true })
     await writeFile(resolve(roundDir, 'report.md'), result.rawOutput, 'utf-8')
-
-    const artifacts = await moveArtifacts(tmp, roundDir)
-    if (artifacts.screenshots.length > 0) {
-      console.log(`  [screenshots] ${artifacts.screenshots.length} saved`)
-    }
-    if (artifacts.videos.length > 0) {
-      console.log(`  [videos] ${artifacts.videos.length} saved`)
-    }
+    await writeReportJson(roundDir, story.id, `round-${round}`, result)
+    logArtifacts(await moveArtifacts(tmp, roundDir))
 
     const parsed = parseChaosOutput(result.rawOutput)
 
@@ -492,7 +539,7 @@ async function runChaosMonkey(
   }
 
   const overallPassed = bugsFound.length === 0
-  allResults.push({ story, featureResults: chaosResults, overallPassed })
+  return { story, featureResults: chaosResults, overallPassed }
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +551,7 @@ function emptySuiteResult(): SuiteResult {
   return {
     startedAt: now,
     finishedAt: now,
-    totalDurationMs: 0,
+    totalDurationSec: 0,
     totalStories: 0,
     passedStories: 0,
     failedStories: 0,
@@ -516,84 +563,68 @@ function emptySuiteResult(): SuiteResult {
   }
 }
 
-function storyReportRef(mode: string, storyId: string, feature: string): string {
-  if (mode === 'happy-path') return `[see happy-path/${storyId}/report.md]`
-  if (mode === 'chaos-monkey') return `[see chaos-monkey/${storyId}/${feature}/report.md]`
-  return `[see feature-test/${storyId}/${feature}/report.md]`
+function reportRelPath(mode: string, storyId: string, feature: string): string {
+  if (mode === 'happy-path') return `happy-path/${storyId}/report.json`
+  if (mode === 'chaos-monkey') return `chaos-monkey/${storyId}/${feature}/report.json`
+  return `feature-test/${storyId}/${feature}/report.json`
+}
+
+async function writeReportJson(dir: string, storyId: string, feature: string | null, result: TestResult): Promise<void> {
+  const report: ReportJson = {
+    storyId,
+    ...(feature && { feature }),
+    passed: result.passed,
+    reason: result.reason,
+    steps: result.steps,
+    bugs: result.bugs,
+    durationMs: result.durationMs,
+    ...(result.sessionId && { sessionId: result.sessionId }),
+    ...(result.cost && { cost: result.cost }),
+  }
+  await writeFile(resolve(dir, 'report.json'), JSON.stringify(report, null, 2), 'utf-8')
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
 }
 
 async function resolveRunDir(baseResultsDir: string, runId: string, append: boolean): Promise<string> {
   const target = resolve(baseResultsDir, runId)
   if (!append) {
-    // Overwrite: remove existing run dir if present
     await rm(target, { recursive: true, force: true })
     await mkdir(target, { recursive: true })
     return target
   }
-  // Append mode: find a free slot (1), (2), ...
-  try {
-    await readdir(target)
-    // Exists — find next available suffix
-    for (let i = 1; i < 100; i++) {
-      const candidate = resolve(baseResultsDir, `${runId}(${i})`)
-      try {
-        await readdir(candidate)
-      } catch {
-        await mkdir(candidate, { recursive: true })
-        return candidate
-      }
-    }
-  } catch {
-    // Does not exist yet
+  if (!existsSync(target)) {
     await mkdir(target, { recursive: true })
+    return target
   }
-  return target
+  for (let i = 1; i <= 99; i++) {
+    const candidate = resolve(baseResultsDir, `${runId}(${i})`)
+    if (!existsSync(candidate)) {
+      await mkdir(candidate, { recursive: true })
+      return candidate
+    }
+  }
+  throw new Error(`Too many append runs for "${runId}" (max 99)`)
 }
 
-
-async function printResultsTree(resultsDir: string): Promise<void> {
+function printResultsTree(resultsDir: string, stories: SummaryStoryEntry[]): void {
   console.log(`\nResults tree:`)
   console.log(`  ${resultsDir}/`)
   console.log(`    summary.json`)
 
-  const modes = ['happy-path', 'feature-test', 'chaos-monkey']
-  for (const mode of modes) {
-    const modeDir = resolve(resultsDir, mode)
-    let storyIds: string[]
-    try {
-      storyIds = await readdir(modeDir)
-    } catch {
-      continue
-    }
-    console.log(`    ${mode}/`)
-    for (const storyId of storyIds) {
-      const storyDir = resolve(modeDir, storyId)
-      console.log(`      ${storyId}/`)
-      // List direct entries (sub-features or round-N for chaos, or files for happy-path)
-      try {
-        const entries = await readdir(storyDir)
-        for (const entry of entries) {
-          if (entry === 'report.md') {
-            console.log(`        report.md`)
-          } else if (entry === 'screenshots' || entry === 'videos') {
-            const subFiles = await readdir(resolve(storyDir, entry)).catch(() => [])
-            console.log(`        ${entry}/ (${subFiles.length} file${subFiles.length !== 1 ? 's' : ''})`)
-          } else {
-            // Sub-directory (feature or round)
-            const subDir = resolve(storyDir, entry)
-            console.log(`        ${entry}/`)
-            const subEntries = await readdir(subDir).catch(() => [])
-            for (const sub of subEntries) {
-              if (sub === 'screenshots' || sub === 'videos') {
-                const subFiles = await readdir(resolve(subDir, sub)).catch(() => [])
-                console.log(`          ${sub}/ (${subFiles.length} file${subFiles.length !== 1 ? 's' : ''})`)
-              } else {
-                console.log(`          ${sub}`)
-              }
-            }
-          }
-        }
-      } catch { /* ignore */ }
+  for (const s of stories) {
+    if (s.features && s.features.length > 0) {
+      for (const f of s.features) {
+        console.log(`    ${f.reportPath.replace(/\/report\.(json|md)$/, '/')}`)
+        console.log(`      report.md`)
+        console.log(`      report.json`)
+      }
+    } else if (s.reportPath) {
+      console.log(`    ${s.reportPath.replace(/\/report\.(json|md)$/, '/')}`)
+      console.log(`      report.md`)
+      console.log(`      report.json`)
     }
   }
   console.log()
@@ -633,7 +664,7 @@ function printSummary(
   summary: SuiteResult,
   allResults: StoryResult[],
   summaryPath: string,
-  totalDurationMs: number,
+  totalDurationSec: number,
 ): void {
   console.log(`\n${'═'.repeat(60)}`)
   console.log('SUMMARY')
@@ -652,8 +683,8 @@ function printSummary(
   console.log(`\n${'─'.repeat(60)}`)
   console.log(`Stories:    ${summary.passedStories}/${summary.totalStories} passed`)
   console.log(`Features:   ${summary.passedFeatures}/${summary.totalFeatures} passed`)
-  console.log(`Duration:   ${(totalDurationMs / 1000).toFixed(1)}s`)
-  console.log(`Cost:       $${summary.totalCostUsd.toFixed(4)}`)
+  console.log(`Duration:   ${totalDurationSec.toFixed(1)}s`)
+  console.log(`Cost:       $${summary.totalCostUsd.toFixed(2)}`)
   console.log(`Results:    ${summaryPath}`)
   console.log(`${'═'.repeat(60)}\n`)
 }

@@ -35,10 +35,9 @@ export async function runTest(
   const startTime = Date.now()
 
   let systemPromptFile: string | undefined
-  let generatedMcpConfig: string | undefined
 
   const mcpConfigPath = options.mcpConfigPath ?? await ensureDefaultMcpConfig(options.record, options.outputDir)
-  generatedMcpConfig = options.mcpConfigPath ? undefined : mcpConfigPath
+  const ownsMcpConfig = !options.mcpConfigPath
 
   const args: string[] = [
     '-p', testPrompt,
@@ -125,7 +124,7 @@ export async function runTest(
     const cleanup = () => {
       clearInterval(activityCheck)
       if (systemPromptFile) unlink(systemPromptFile).catch(() => {})
-      if (generatedMcpConfig) unlink(generatedMcpConfig).catch(() => {})
+      if (ownsMcpConfig) unlink(mcpConfigPath).catch(() => {})
     }
 
     proc.on('error', (err) => {
