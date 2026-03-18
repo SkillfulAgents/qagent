@@ -27,6 +27,7 @@ Options:
   --budget <usd>          Per-test spending cap in USD
   --project-dir <path>    Path to the qagent project directory
   --record                Record video of browser sessions
+  --headless              Force headless browser (no visible window)
   --append                Append results instead of overwriting same run ID
   --upload                Upload results to GitHub Artifacts (requires GITHUB_ACTIONS env)
   --help                  Show this help message
@@ -45,6 +46,7 @@ function parseArgs(): { command: string; options: RunOptions } {
   let budgetOverride: number | undefined
   let projectDirArg: string | undefined
   let record = false
+  let headless: boolean | undefined
   let append = false
   let upload = false
 
@@ -74,6 +76,9 @@ function parseArgs(): { command: string; options: RunOptions } {
       case '--record':
         record = true
         break
+      case '--headless':
+        headless = true
+        break
       case '--append':
         append = true
         break
@@ -91,7 +96,7 @@ function parseArgs(): { command: string; options: RunOptions } {
 
   return {
     command,
-    options: { filter, verbose, maxRetries, baseUrl, model, budgetOverride, projectDir, record, append, upload },
+    options: { filter, verbose, maxRetries, baseUrl, model, budgetOverride, projectDir, record, headless, append, upload },
   }
 }
 

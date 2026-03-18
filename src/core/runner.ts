@@ -153,6 +153,7 @@ async function buildStoryRunContext(
     systemPrompt,
     maxBudgetUsd: budget,
     record: opts.record,
+    headless: opts.headless,
   }
 
   return {
@@ -225,6 +226,7 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   console.log(`Project dir: ${projectDir}`)
   console.log(`Run ID:      ${runId}`)
   if (record) console.log(`Record:      enabled`)
+  if (opts.headless) console.log(`Headless:    enabled`)
   console.log(`Base URL:    ${baseUrl}`)
   console.log(`Max retries: ${opts.maxRetries}`)
   console.log(`Verbose:     ${verbose}`)

@@ -94,6 +94,11 @@ export interface RunOptions {
   append?: boolean
   /** Upload results to GitHub Artifacts after run. */
   upload?: boolean
+  /**
+   * Force headless browser mode. When not set, the driver decides
+   * automatically (headless in CI when DISPLAY is absent, visible otherwise).
+   */
+  headless?: boolean
 }
 
 // ---------------------------------------------------------------------------
