@@ -41,13 +41,8 @@ export function loadEnvFile(projectDir: string): void {
       if (!existsSync(envPath)) continue
 
       const content = readFileSync(envPath, 'utf-8')
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith('#')) continue
-        const eqIdx = trimmed.indexOf('=')
-        if (eqIdx === -1) continue
-        const key = trimmed.slice(0, eqIdx).trim()
-        const value = trimmed.slice(eqIdx + 1).trim()
+      const entries = parseEnvContent(content)
+      for (const [key, value] of entries) {
         if (!process.env[key]) {
           process.env[key] = value
         }
@@ -56,4 +51,29 @@ export function loadEnvFile(projectDir: string): void {
       return
     }
   }
+}
+
+/**
+ * Parses .env file content into key-value pairs.
+ * Handles `export` prefix and surrounding quotes (single/double).
+ */
+export function parseEnvContent(content: string): [string, string][] {
+  const entries: [string, string][] = []
+  for (const line of content.split('\n')) {
+    let trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('export ')) trimmed = trimmed.slice(7)
+    const eqIdx = trimmed.indexOf('=')
+    if (eqIdx === -1) continue
+    const key = trimmed.slice(0, eqIdx).trim()
+    let value = trimmed.slice(eqIdx + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    entries.push([key, value])
+  }
+  return entries
 }
