@@ -2,6 +2,7 @@ export { run, runFeatureWithRetries } from './core/runner.js'
 export { runTest, type SpawnFn } from './core/driver.js'
 export { resolveProjectDir, loadEnvFile } from './core/config.js'
 export { initProject } from './core/init.js'
+export { validate } from './core/validate.js'
 export { computeSessionCost, findSessionJsonl } from './utils/cost-helper.js'
 export { resolveRunId } from './utils/run-id.js'
 

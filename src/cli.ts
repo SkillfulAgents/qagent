@@ -11,6 +11,7 @@
 import { resolveProjectDir, loadEnvFile } from './core/config.js'
 import { run } from './core/runner.js'
 import { initProject, printInitResult } from './core/init.js'
+import { validate, printValidation } from './core/validate.js'
 import type { RunOptions } from './types.js'
 
 function printHelp(): void {
@@ -18,8 +19,9 @@ function printHelp(): void {
 qagent — Agentic E2E testing framework
 
 Usage:
-  qagent init [options]       Scaffold a new project directory
-  qagent run  [options]       Run tests
+  qagent init     [options]   Scaffold a new project directory
+  qagent validate [options]   Check stories, features, hooks, and environment
+  qagent run      [options]   Run tests
 
 Options:
   --filter <pattern>      Filter stories by id, name, or path (substring match)
@@ -138,8 +140,16 @@ async function main() {
     process.exit(0)
   }
 
+  if (command === 'validate') {
+    const dir = resolveProjectDir(getProjectDirArg(argv))
+    loadEnvFile(dir)
+    const result = await validate(dir)
+    printValidation(result)
+    process.exit(result.ok ? 0 : 1)
+  }
+
   if (command !== 'run') {
-    console.error(`Unknown command: ${command}. Use "qagent init", "qagent run", or "qagent --help".`)
+    console.error(`Unknown command: ${command}. Use "qagent init", "qagent validate", "qagent run", or "qagent --help".`)
     process.exit(1)
   }
 
