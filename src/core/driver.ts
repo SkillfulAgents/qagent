@@ -88,8 +88,6 @@ export async function runTest(
     }, timeoutMs)
 
     const activityCheck = setInterval(() => {
-      if (!proc.pid || proc.killed) { clearInterval(activityCheck); return }
-      try { process.kill(proc.pid, 0) } catch { clearInterval(activityCheck); return }
       console.log(`[health] agent processing... (${Math.round((Date.now() - startTime) / 1000)}s)`)
     }, 60000)
 
