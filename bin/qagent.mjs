@@ -12,4 +12,5 @@
 import { register } from 'tsx/esm/api'
 
 register()
-await import('../dist/cli.js')
+const { startCLI } = await import('../dist/cli.js')
+startCLI()

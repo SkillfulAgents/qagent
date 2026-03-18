@@ -85,6 +85,20 @@ export async function loadFeatureFile(projectDir: string, name: string): Promise
 }
 
 /**
+ * Loads `<projectDir>/features/ignore.md` if it exists.
+ * Content applies to all features — use it to list known behaviors
+ * that should not be reported as bugs.
+ */
+export async function loadIgnoreFile(projectDir: string): Promise<string | null> {
+  const filePath = resolve(projectDir, 'features', 'ignore.md')
+  try {
+    return (await readFile(filePath, 'utf-8')).trim() || null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Loads all feature spec files and concatenates them as a reference document.
  * Used for chaos-monkey mode where the agent needs awareness of all features.
  */

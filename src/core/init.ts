@@ -32,6 +32,13 @@ The login page allows users to authenticate with email and password.
 3. Leave fields empty, click Sign In → validation messages shown
 `
 
+const EXAMPLE_IGNORE = `# Known Behaviors
+
+List behaviors here that the agent should NOT report as bugs.
+
+- The "Forgot password?" link opens a mailto: link instead of an in-app flow. This is intentional.
+`
+
 const SYSTEM_PROMPT = `You are a QA automation engineer performing end-to-end tests via browser automation.
 
 Be thorough but efficient. Take screenshots after each key action. Report bugs clearly.
@@ -64,6 +71,7 @@ export async function initProject(projectDir: string): Promise<InitResult> {
   const files: [string, string][] = [
     ['stories/smoke.yaml', SMOKE_STORY],
     ['features/login.md', EXAMPLE_FEATURE],
+    ['features/ignore.md', EXAMPLE_IGNORE],
     ['system-prompt.md', SYSTEM_PROMPT],
     ['.env.local', ENV_TEMPLATE],
   ]

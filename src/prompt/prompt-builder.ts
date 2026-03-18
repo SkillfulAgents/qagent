@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { loadFeatureFile, loadAllFeatures } from '../loader/story-loader.js'
+import { loadFeatureFile, loadIgnoreFile, loadAllFeatures } from '../loader/story-loader.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -115,6 +115,7 @@ export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<st
   } = opts
 
   const featureContent = await loadFeatureFile(projectDir, featureName)
+  const ignoreContent = await loadIgnoreFile(projectDir)
 
   const appDescription = skipNavigation
     ? `a desktop application called ${appName} (already open — do NOT navigate away from the current page)`
@@ -144,7 +145,7 @@ ${taskInstructions}
 ### Feature: ${featureName}
 
 ${featureContent}
-
+${ignoreContent ? `\n## Known Behaviors (Do NOT Report as Bugs)\n\nThe following behaviors have been reviewed and confirmed as working as intended. Do NOT report them as bugs:\n\n${ignoreContent}\n` : ''}
 ## Bug Reporting
 
 For each bug, record:

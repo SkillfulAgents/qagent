@@ -160,9 +160,7 @@ async function main() {
   process.exit(result.failedStories > 0 ? 1 : 0)
 }
 
-const entryScript = process.argv[1] ?? ''
-const isCLI = /(?:cli\.[jt]s|qagent(?:\.mjs)?)$/.test(entryScript)
-if (isCLI) {
+export function startCLI(): void {
   main().catch((err) => {
     console.error('Fatal error:', err)
     process.exit(2)
