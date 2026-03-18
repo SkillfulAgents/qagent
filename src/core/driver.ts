@@ -139,8 +139,9 @@ export async function runTest(
 }
 
 async function ensureDefaultMcpConfig(record?: boolean, outputDir?: string, headless?: boolean): Promise<string> {
+  const effectiveHeadless = headless ?? !process.env.DISPLAY
   const mcpArgs = [resolvePlaywrightMcpBin(), `--output-dir=${outputDir ?? process.cwd()}`]
-  if (headless) mcpArgs.push('--headless')
+  if (effectiveHeadless) mcpArgs.push('--headless')
   if (record) mcpArgs.push('--save-video=1280x720')
 
   const config = { mcpServers: { playwright: { command: 'node', args: mcpArgs } } }
