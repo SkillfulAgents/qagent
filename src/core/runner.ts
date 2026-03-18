@@ -346,6 +346,19 @@ async function runWithConcurrency<T, R>(
   return results
 }
 
+function createMutex() {
+  let chain = Promise.resolve()
+  return {
+    acquire<T>(fn: () => Promise<T>): Promise<T> {
+      const next = chain.then(fn, fn)
+      chain = next.then(() => {}, () => {})
+      return next
+    },
+  }
+}
+
+const setupMutex = createMutex()
+
 async function runSingleStory(
   story: Story,
   opts: RunOptions,
@@ -363,22 +376,23 @@ async function runSingleStory(
   let setupOk = true
   try {
     if (story.setup && story.setup.length > 0) {
-      console.log(`\n[setup] ${story.setup.join(', ')}`)
-      try {
-        await runHooks(story.setup, rc.setupCtx, 'setup', () => applyStoreOverrides(rc))
-      } catch (err) {
-        setupOk = false
-        const reason = `Setup failed: ${err instanceof Error ? err.message : String(err)}`
-        console.error(`[setup] ${reason}`)
-        return { story, featureResults: [], overallPassed: false }
-      }
+      await setupMutex.acquire(async () => {
+        console.log(`\n[setup] ${story.setup!.join(', ')} (${story.id})`)
+        try {
+          await runHooks(story.setup!, rc.setupCtx, 'setup', () => applyStoreOverrides(rc))
+        } catch (err) {
+          setupOk = false
+          const reason = `Setup failed: ${err instanceof Error ? err.message : String(err)}`
+          console.error(`[setup] ${reason}`)
+        }
+      })
     }
 
-    if (setupOk) {
-      return await dispatchStory(rc)
+    if (!setupOk) {
+      return { story, featureResults: [], overallPassed: false }
     }
 
-    return { story, featureResults: [], overallPassed: false }
+    return await dispatchStory(rc)
   } finally {
     if (story.teardown && story.teardown.length > 0) {
       console.log(`\n[teardown] ${story.teardown.join(', ')}`)
