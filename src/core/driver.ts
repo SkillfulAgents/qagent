@@ -45,16 +45,18 @@ export async function runTest(
     '--max-budget-usd', String(maxBudgetUsd),
     '--mcp-config', mcpConfigPath,
     '--dangerously-skip-permissions',
-    '--session-id', sessionId,
   ]
 
   let systemPromptFile: string | undefined
   if (resumeSessionId) {
     args.push('--resume', resumeSessionId)
-  } else if (options.systemPrompt) {
-    systemPromptFile = resolve(tmpdir(), `qagent-system-${randomUUID()}.md`)
-    await writeFile(systemPromptFile, options.systemPrompt, 'utf-8')
-    args.push('--system-prompt', systemPromptFile)
+  } else {
+    args.push('--session-id', sessionId)
+    if (options.systemPrompt) {
+      systemPromptFile = resolve(tmpdir(), `qagent-system-${randomUUID()}.md`)
+      await writeFile(systemPromptFile, options.systemPrompt, 'utf-8')
+      args.push('--system-prompt', systemPromptFile)
+    }
   }
 
   if (maxTurns) args.push('--max-turns', String(maxTurns))

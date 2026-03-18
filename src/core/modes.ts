@@ -167,11 +167,17 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
       result = await runTest(prompt, {
         ...driverOptions,
         outputDir: roundDir,
-        sessionId: isFirstRound ? sessionId : undefined,
+        sessionId,
         resumeSessionId: isFirstRound ? undefined : sessionId,
       })
     } catch (err) {
       console.warn(`[chaos-monkey] Round ${round} error: ${err instanceof Error ? err.message : String(err)}`)
+      break
+    }
+
+    if (result.durationMs < 5_000 && !result.passed && !result.rawOutput) {
+      console.warn(`[chaos-monkey] Round ${round} completed too quickly with no output, likely a session error. Stopping.`)
+      chaosResults.push({ feature: `round-${round}`, result })
       break
     }
 
