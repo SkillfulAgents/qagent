@@ -17,7 +17,7 @@ import {
   buildChaosFollowUpPrompt,
 } from '../prompt/prompt-builder.js'
 import { parseChaosOutput } from '../prompt/output-parser.js'
-import { runTest } from './driver.js'
+import { runTest, waitForMcpDrain } from './driver.js'
 import { runFeatureWithRetries } from './runner.js'
 import { writeReportJson, countArtifacts, logArtifacts, printFeatureResult } from './reporter.js'
 
@@ -66,8 +66,15 @@ export async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
     return { story, featureResults: [], overallPassed: true }
   }
 
-  for (const feat of features) {
-    console.log(`\n> Running feature: ${feat}...`)
+  for (let fi = 0; fi < features.length; fi++) {
+    const feat = features[fi]
+
+    if (fi > 0) {
+      console.log(`\n[drain] Waiting for previous MCP session to release...`)
+      await waitForMcpDrain()
+    }
+
+    console.log(`\n> Running feature [${fi + 1}/${features.length}]: ${feat}...`)
 
     const featDir = resolve(resultsDir, 'feature-test', story.id, feat)
     await mkdir(featDir, { recursive: true })

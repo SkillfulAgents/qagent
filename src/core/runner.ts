@@ -236,6 +236,8 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
     console.log(`> [${story.id}] ${story.name} (${story.mode})`)
     console.log(`${'─'.repeat(60)}`)
 
+    await cleanStoryResults(resultsDir, story)
+
     const rc = await buildStoryRunContext(story, opts, systemPrompt, resultsDir, budget)
     let setupOk = true
     try {
@@ -352,7 +354,6 @@ function round2(n: number): number {
 async function resolveRunDir(baseResultsDir: string, runId: string, append: boolean): Promise<string> {
   const target = resolve(baseResultsDir, runId)
   if (!append) {
-    await rm(target, { recursive: true, force: true })
     await mkdir(target, { recursive: true })
     return target
   }
@@ -368,6 +369,19 @@ async function resolveRunDir(baseResultsDir: string, runId: string, append: bool
     }
   }
   throw new Error(`Too many append runs for "${runId}" (max 99)`)
+}
+
+async function cleanStoryResults(resultsDir: string, story: Story): Promise<void> {
+  const modeDirs: Record<string, string> = {
+    'happy-path': resolve(resultsDir, 'happy-path', story.id),
+    'feature-test': resolve(resultsDir, 'feature-test', story.id),
+    'chaos-monkey': resolve(resultsDir, 'chaos-monkey', story.id),
+  }
+  const target = modeDirs[story.mode]
+  if (target && existsSync(target)) {
+    await rm(target, { recursive: true, force: true })
+    console.log(`[cleanup] Removed previous results for story "${story.id}"`)
+  }
 }
 
 async function printDryRun(

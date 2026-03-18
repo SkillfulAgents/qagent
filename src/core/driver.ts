@@ -2,7 +2,7 @@
  * Claude Code CLI driver — spawns the `claude` CLI and captures output.
  * Prompt construction lives in prompt-builder.ts.
  */
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { spawn, execSync, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { writeFile, unlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
@@ -105,6 +105,7 @@ export async function runTest(
 
     const cleanup = () => {
       clearInterval(activityCheck)
+      if (proc.pid) killOrphanMcpProcesses(proc.pid)
       if (systemPromptFile) unlink(systemPromptFile).catch(() => {})
       if (ownsMcpConfig) unlink(mcpConfigPath).catch(() => {})
     }
@@ -157,4 +158,36 @@ function resolvePlaywrightMcpBin(): string {
   const hoisted = resolve(packageRoot, '..', '@playwright', 'mcp', 'cli.js')
   if (existsSync(hoisted)) return hoisted
   throw new Error('Cannot resolve @playwright/mcp/cli.js. Run "npm install" in qagent.')
+}
+
+/**
+ * After a Claude CLI process exits, its MCP server child (Playwright) may
+ * linger as an orphan. If multiple MCP instances attach to the same CDP
+ * endpoint they fight over the browser and crash Electron.
+ *
+ * We use `pgrep -P <pid>` to find direct children of the Claude process
+ * and kill them. This is best-effort — if the process tree is already
+ * cleaned up, we silently ignore errors.
+ */
+function killOrphanMcpProcesses(claudePid: number): void {
+  try {
+    const children = execSync(`pgrep -P ${claudePid}`, { encoding: 'utf-8' }).trim()
+    if (!children) return
+    for (const pidStr of children.split('\n')) {
+      const pid = parseInt(pidStr, 10)
+      if (!pid || pid === claudePid) continue
+      try {
+        process.kill(pid, 'SIGTERM')
+        console.log(`[driver] Killed orphan child process ${pid} (parent: ${claudePid})`)
+      } catch { /* already exited */ }
+    }
+  } catch { /* pgrep failed = no children, fine */ }
+}
+
+/**
+ * Waits for any MCP/Playwright processes attached to a CDP endpoint to
+ * fully exit. Called between features to avoid overlapping sessions.
+ */
+export async function waitForMcpDrain(delayMs = 1500): Promise<void> {
+  await new Promise((r) => setTimeout(r, delayMs))
 }
