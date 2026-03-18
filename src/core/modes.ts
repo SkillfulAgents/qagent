@@ -137,6 +137,9 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
   console.log(`\n> Unleashing the chaos monkey (duration: ${durationLabel})...`)
   console.log(`[chaos-monkey] Session: ${sessionId}`)
 
+  const sessionDir = resolve(resultsDir, 'chaos-monkey', story.id)
+  await mkdir(sessionDir, { recursive: true })
+
   const initialPrompt = await buildChaosPrompt({
     projectDir: setupCtx.projectDir,
     baseUrl: setupCtx.baseUrl,
@@ -159,14 +162,14 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
       console.log('[prompt]\n' + prompt + '\n')
     }
 
-    const roundDir = resolve(resultsDir, 'chaos-monkey', story.id, `round-${round}`)
+    const roundDir = resolve(sessionDir, `round-${round}`)
     await mkdir(roundDir, { recursive: true })
 
     let result: TestResult
     try {
       result = await runTest(prompt, {
         ...driverOptions,
-        outputDir: roundDir,
+        outputDir: sessionDir,
         sessionId,
         resumeSessionId: isFirstRound ? undefined : sessionId,
       })
@@ -175,8 +178,9 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
       break
     }
 
-    if (result.durationMs < 5_000 && !result.passed && !result.rawOutput) {
-      console.warn(`[chaos-monkey] Round ${round} completed too quickly with no output, likely a session error. Stopping.`)
+    if (result.durationMs < 5_000 && !result.passed) {
+      console.warn(`[chaos-monkey] Round ${round} failed in ${(result.durationMs / 1000).toFixed(1)}s — likely a session/CLI error. Stopping.`)
+      console.warn(`[chaos-monkey] Reason: ${result.reason ?? 'unknown'}`)
       chaosResults.push({ feature: `round-${round}`, result })
       break
     }
