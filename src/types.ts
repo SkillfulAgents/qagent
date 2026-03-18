@@ -99,6 +99,8 @@ export interface RunOptions {
    * automatically (headless in CI when DISPLAY is absent, visible otherwise).
    */
   headless?: boolean
+  /** Print what would be executed without spawning the agent. */
+  dryRun?: boolean
 }
 
 // ---------------------------------------------------------------------------

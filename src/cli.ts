@@ -31,6 +31,7 @@ Options:
   --project-dir <path>    Path to the qagent project directory
   --record                Record video of browser sessions
   --headless              Force headless browser (no visible window)
+  --dry-run               Show what would be executed without running tests
   --append                Append results instead of overwriting same run ID
   --upload                Upload results to GitHub Artifacts (requires GITHUB_ACTIONS env)
   --help                  Show this help message
@@ -57,6 +58,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): { command: st
   let projectDirArg: string | undefined
   let record = false
   let headless: boolean | undefined
+  let dryRun = false
   let append = false
   let upload = false
 
@@ -89,6 +91,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): { command: st
       case '--headless':
         headless = true
         break
+      case '--dry-run':
+        dryRun = true
+        break
       case '--append':
         append = true
         break
@@ -106,7 +111,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): { command: st
 
   return {
     command,
-    options: { filter, verbose, maxRetries, baseUrl, model, budgetOverride, projectDir, record, headless, append, upload },
+    options: { filter, verbose, maxRetries, baseUrl, model, budgetOverride, projectDir, record, headless, dryRun, append, upload },
   }
 }
 

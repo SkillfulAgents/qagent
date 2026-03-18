@@ -19,7 +19,12 @@ import type {
 } from '../types.js'
 import { loadStories } from '../loader/story-loader.js'
 import { runHooks } from '../loader/hook-loader.js'
-import { buildSystemPrompt } from '../prompt/prompt-builder.js'
+import {
+  buildSystemPrompt,
+  buildStepsPrompt,
+  buildFeaturePrompt,
+  buildChaosPrompt,
+} from '../prompt/prompt-builder.js'
 import { runTest } from './driver.js'
 import { computeSessionCost } from '../utils/cost-helper.js'
 import { resolveRunId } from '../utils/run-id.js'
@@ -215,6 +220,11 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
 
   const systemPrompt = await buildSystemPrompt(projectDir)
 
+  if (opts.dryRun) {
+    await printDryRun(stories, projectDir, baseUrl, systemPrompt)
+    return emptySuiteResult()
+  }
+
   const baseResultsDir = resolve(projectDir, 'results')
   const resultsDir = await resolveRunDir(baseResultsDir, runId, append)
 
@@ -358,4 +368,63 @@ async function resolveRunDir(baseResultsDir: string, runId: string, append: bool
     }
   }
   throw new Error(`Too many append runs for "${runId}" (max 99)`)
+}
+
+async function printDryRun(
+  stories: Story[],
+  projectDir: string,
+  baseUrl: string,
+  systemPrompt: string,
+): Promise<void> {
+  console.log(`[dry-run] Would execute ${stories.length} story/stories. No tests will run.\n`)
+
+  if (systemPrompt) {
+    console.log('─── System Prompt ───')
+    console.log(systemPrompt.length > 200 ? systemPrompt.slice(0, 200) + '...' : systemPrompt)
+    console.log()
+  }
+
+  for (const story of stories) {
+    console.log(`${'─'.repeat(60)}`)
+    console.log(`Story: [${story.id}] ${story.name}`)
+    console.log(`Mode:  ${story.mode}`)
+    if (story.baseUrl) console.log(`URL:   ${story.baseUrl}`)
+    if (story.setup?.length) console.log(`Setup: ${story.setup.join(', ')}`)
+    if (story.teardown?.length) console.log(`Teardown: ${story.teardown.join(', ')}`)
+
+    try {
+      switch (story.mode) {
+        case 'happy-path':
+          if (story.steps) {
+            const prompt = await buildStepsPrompt({
+              projectDir,
+              steps: story.steps,
+              featureNames: story.features,
+            })
+            console.log(`\n[prompt] (${prompt.length} chars)`)
+            console.log(prompt.slice(0, 500) + (prompt.length > 500 ? '\n...' : ''))
+          } else {
+            console.log('\n[warn] No "steps" field defined.')
+          }
+          break
+        case 'feature-test':
+          for (const feat of story.features ?? []) {
+            const prompt = await buildFeaturePrompt({ projectDir, featureName: feat, baseUrl: story.baseUrl ?? baseUrl })
+            console.log(`\n[prompt: ${feat}] (${prompt.length} chars)`)
+            console.log(prompt.slice(0, 500) + (prompt.length > 500 ? '\n...' : ''))
+          }
+          if (!story.features?.length) console.log('\n[warn] No features defined.')
+          break
+        case 'chaos-monkey': {
+          const prompt = await buildChaosPrompt({ projectDir, baseUrl: story.baseUrl ?? baseUrl })
+          console.log(`\n[prompt] (${prompt.length} chars)`)
+          console.log(prompt.slice(0, 500) + (prompt.length > 500 ? '\n...' : ''))
+          break
+        }
+      }
+    } catch (err) {
+      console.log(`\n[error] ${err instanceof Error ? err.message : String(err)}`)
+    }
+    console.log()
+  }
 }
