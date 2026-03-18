@@ -31,6 +31,7 @@ import { resolveRunId } from '../utils/run-id.js'
 import { runSteps, runFeatures, runChaosMonkey } from './modes.js'
 import { reportRelPath, printSummary, printResultsTree } from './reporter.js'
 import { uploadArtifacts } from './upload.js'
+import { generateHtmlReport } from './html-reporter.js'
 
 // ---------------------------------------------------------------------------
 // Retry wrapper
@@ -301,6 +302,12 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
 
   printSummary(summary, allResults, summaryPath, totalDurationSec)
   printResultsTree(resultsDir, summaryResults)
+
+  try {
+    await generateHtmlReport(resultsDir)
+  } catch (err) {
+    console.warn(`[report] HTML generation failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   if (upload) {
     await uploadArtifacts(resultsDir, runId)
