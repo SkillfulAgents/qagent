@@ -86,6 +86,7 @@ Stories are YAML files in `stories/` (scanned recursively). Each file can contai
 | `features` | string[] | no | Feature names (map to `features/<name>.md`) |
 | `steps` | string | no | Explicit steps for `happy-path` mode (multiline) |
 | `baseUrl` | string | no | Override the CLI `--base-url` for this story |
+| `duration` | string | no | Time limit for `chaos-monkey` mode, e.g. `10m`, `1h` (default: `1h`) |
 | `setup` | string[] | no | Hook names to run before the test (from `hooks/`) |
 | `teardown` | string[] | no | Hook names to run after the test (from `hooks/`) |
 
@@ -126,6 +127,7 @@ teardown:
 id: chaos-hunt
 name: "Bug hunting session"
 mode: chaos-monkey
+duration: 30m
 ```
 
 ## Test Modes
@@ -151,9 +153,10 @@ The agent uses feature spec files as a guide, then explores beyond them. Best fo
 The agent freely explores the application to find bugs. Best for fuzz testing and bug hunting.
 
 - Loads all feature specs as reference (not a checklist)
-- Runs in rounds — each round finds one bug, then continues
+- Runs in rounds — each round the agent explores and reports any bug found
 - Uses session resumption to maintain browser state across rounds
-- Stops when no more bugs are found
+- Continues until the `duration` time limit is reached (default: `1h`)
+- Set `duration` in the story YAML, e.g. `duration: 30m`
 
 ## CLI Reference
 

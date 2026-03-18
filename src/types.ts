@@ -17,6 +17,8 @@ export interface Story {
   steps?: string
   /** Override the CLI --base-url for this story. */
   baseUrl?: string
+  /** Time limit for chaos-monkey mode, e.g. "10m", "1h". Default: "1h". */
+  duration?: string
   setup?: string[]
   teardown?: string[]
 }

@@ -33,9 +33,16 @@ export async function runSteps(rc: StoryRunContext): Promise<StoryResult> {
   const storyDir = resolve(resultsDir, 'happy-path', story.id)
   await mkdir(storyDir, { recursive: true })
 
+  let steps = story.steps!
+  for (const [key, value] of setupCtx.store.entries()) {
+    if (typeof value === 'string') {
+      steps = steps.replaceAll(`{{${key}}}`, value)
+    }
+  }
+
   const prompt = await buildStepsPrompt({
     projectDir: setupCtx.projectDir,
-    steps: story.steps!,
+    steps,
     featureNames: story.features,
   })
 
@@ -106,14 +113,28 @@ export async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
 // Mode: chaos-monkey
 // ---------------------------------------------------------------------------
 
+function parseDuration(raw: string): number {
+  const match = raw.trim().match(/^(\d+(?:\.\d+)?)\s*(s|m|h)$/i)
+  if (!match) throw new Error(`Invalid duration format: "${raw}". Use e.g. "30m", "1h", "90s".`)
+  const value = parseFloat(match[1])
+  switch (match[2].toLowerCase()) {
+    case 's': return value * 1_000
+    case 'm': return value * 60_000
+    case 'h': return value * 3_600_000
+    default:  return value * 60_000
+  }
+}
+
 export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> {
   const { story, setupCtx, driverOptions, resultsDir } = rc
-  const MAX_ROUNDS = 100
+  const durationMs = parseDuration(story.duration ?? '1h')
   const bugsFound: string[] = []
   const chaosResults: FeatureResult[] = []
   const sessionId = randomUUID()
+  const startTime = Date.now()
 
-  console.log(`\n> Unleashing the chaos monkey (max ${MAX_ROUNDS} rounds)...`)
+  const durationLabel = story.duration ?? '1h'
+  console.log(`\n> Unleashing the chaos monkey (duration: ${durationLabel})...`)
   console.log(`[chaos-monkey] Session: ${sessionId}`)
 
   const initialPrompt = await buildChaosPrompt({
@@ -121,8 +142,15 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
     baseUrl: setupCtx.baseUrl,
   })
 
-  for (let round = 1; round <= MAX_ROUNDS; round++) {
-    console.log(`\n> [chaos-monkey] Round ${round}/${MAX_ROUNDS}...`)
+  for (let round = 1; ; round++) {
+    const elapsed = Date.now() - startTime
+    if (elapsed >= durationMs) {
+      console.log(`\n[chaos-monkey] Time limit reached (${durationLabel}), stopping.`)
+      break
+    }
+
+    const remaining = Math.round((durationMs - elapsed) / 1000)
+    console.log(`\n> [chaos-monkey] Round ${round} (${remaining}s remaining)...`)
 
     const isFirstRound = round === 1
     const prompt = isFirstRound ? initialPrompt : buildChaosFollowUpPrompt(bugsFound)
@@ -152,28 +180,20 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
 
     const parsed = parseChaosOutput(result.rawOutput)
 
-    if (!parsed.bugFound && !parsed.noBugMarker) {
-      console.log(`  [WARN] No [BUG_FOUND] or [NO_BUG_FOUND] marker found, continuing...`)
-      chaosResults.push({ feature: `round-${round}`, result })
-      continue
-    }
-
     if (parsed.bugFound) {
       bugsFound.push(parsed.bugFound)
       console.log(`  [BUG #${bugsFound.length}] ${parsed.bugFound}`)
-    } else {
+    } else if (parsed.noBugMarker) {
       console.log(`  [NO BUG] Agent found no new bugs this round.`)
+    } else {
+      console.log(`  [WARN] No [BUG_FOUND] or [NO_BUG_FOUND] marker found.`)
     }
 
     chaosResults.push({ feature: `round-${round}`, result })
-
-    if (!parsed.bugFound) {
-      console.log(`[chaos-monkey] No more bugs found, stopping.`)
-      break
-    }
   }
 
-  console.log(`\n[chaos-monkey] Total bugs found: ${bugsFound.length}`)
+  const totalElapsed = Math.round((Date.now() - startTime) / 1000)
+  console.log(`\n[chaos-monkey] Finished after ${totalElapsed}s, ${bugsFound.length} bug(s) found:`)
   for (let i = 0; i < bugsFound.length; i++) {
     console.log(`  ${i + 1}. ${bugsFound[i]}`)
   }

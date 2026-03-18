@@ -224,6 +224,8 @@ export interface ChaosPromptOptions {
   baseUrl: string
   appName?: string
   avoidRules?: string[]
+  /** Extra context injected into the prompt (e.g. pre-created resources from setup hooks). */
+  setupContext?: string
 }
 
 export async function buildChaosPrompt(opts: ChaosPromptOptions): Promise<string> {

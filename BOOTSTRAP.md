@@ -41,6 +41,7 @@ steps: |                      # multiline string, only for happy-path mode
   1. Navigate to http://localhost:3000
   2. Click the login button
   3. ...
+duration: 30m                 # time limit for chaos-monkey mode (default: 1h)
 setup:                        # hook filenames (without extension) from hooks/
   - seed-db
 teardown:
@@ -53,7 +54,7 @@ teardown:
 
 **feature-test** — Deep feature verification. The agent uses `features/<name>.md` as a guide, then explores edges and variations. Each feature runs in a separate session. Best for thorough testing.
 
-**chaos-monkey** — Bug hunting. The agent loads all feature specs as reference, then freely explores the app to find bugs. Runs in rounds, finding one bug per round. Best for fuzz testing.
+**chaos-monkey** — Bug hunting. The agent loads all feature specs as reference, then freely explores the app to find bugs. Runs in rounds until the `duration` time limit is reached (default: `1h`). Best for fuzz testing.
 
 ### Feature Spec Format (Markdown)
 
@@ -234,6 +235,7 @@ features:
 id: todo-chaos
 name: "Todo bug hunting"
 mode: chaos-monkey
+duration: 30m
 ```
 
 ### Run commands
