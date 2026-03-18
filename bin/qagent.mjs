@@ -1,16 +1,27 @@
 #!/usr/bin/env node
 
 /**
- * QAgent CLI wrapper — this file exists for one reason:
+ * QAgent CLI wrapper.
  *
  * Node.js cannot `import()` TypeScript files natively. User-defined hooks
  * (e.g. `.qagent/hooks/seed-db.ts`) are loaded at runtime via dynamic import.
- * By calling tsx's `register()` here — before anything else runs — we patch
- * Node's module loader so that `.ts` imports "just work" everywhere, without
- * any special handling in the hook loader or elsewhere.
+ *
+ * We spawn a child process with tsx's --import loader to register TypeScript
+ * support before the CLI runs. This avoids the ESM require() cycle issue that
+ * occurs with tsx's register() API on Node 22+.
  */
-import { register } from 'tsx/esm/api'
 
-register()
-const { startCLI } = await import('../dist/cli.js')
-startCLI()
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const entryPath = resolve(__dirname, 'qagent-entry.mjs')
+
+const child = spawn(
+  process.execPath,
+  ['--import', 'tsx/esm', entryPath, ...process.argv.slice(2)],
+  { stdio: 'inherit', env: process.env },
+)
+
+child.on('close', (code) => process.exit(code ?? 1))
