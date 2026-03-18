@@ -18,6 +18,17 @@ export interface ParsedOutput {
 }
 
 export function parseFeatureOutput(output: string): ParsedOutput {
+  const earlyStopMatch = output.match(/^\[EARLY_STOP\]\s*(.+)$/m)
+  if (earlyStopMatch) {
+    const stepLines = [...output.matchAll(/^\[STEP\]\s*(.+)$/gm)].map((m) => m[1].trim())
+    return {
+      passed: false,
+      reason: `Early stop: ${earlyStopMatch[1].trim()}`,
+      steps: stepLines,
+      bugs: [],
+    }
+  }
+
   const passMatch = output.match(/^\[TEST_PASS\]/m)
   const failMatch = output.match(/^\[TEST_FAIL\]/m)
   const reasonMatch = output.match(/^\[REASON\]\s*(.+)$/m)

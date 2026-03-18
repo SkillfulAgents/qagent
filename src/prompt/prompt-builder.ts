@@ -33,13 +33,32 @@ export async function buildSystemPrompt(projectDir: string): Promise<string> {
 // Output marker instructions
 // ---------------------------------------------------------------------------
 
+const EARLY_STOP_INSTRUCTIONS = `
+## Early Stop
+
+If any of the following occur, **stop immediately** — do not retry or work around the problem. Output your report right away to avoid wasting budget:
+
+- The target URL returns an error (404, 500, connection refused) or a blank page.
+- You are redirected to a login page and have no credentials.
+- The feature under test clearly does not exist (all expected elements are missing, the page structure is completely different from the description).
+- The app has crashed or is unresponsive (multiple consecutive actions fail with errors).
+
+When stopping early, begin your output with:
+
+[EARLY_STOP] One-line reason why you stopped
+
+Then continue with the normal report format below.`
+
 const FEATURE_OUTPUT_INSTRUCTIONS = `
+${EARLY_STOP_INSTRUCTIONS}
+
 ## Final Output
 
 After testing, end your response with a structured report. The very first line of your report MUST be one of:
 
 [TEST_PASS]
 [TEST_FAIL]
+[EARLY_STOP] reason
 
 Then continue with:
 
