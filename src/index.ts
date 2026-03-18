@@ -1,4 +1,4 @@
-export { run } from './core/runner.js'
+export { run, runFeatureWithRetries } from './core/runner.js'
 export { runTest, type SpawnFn } from './core/driver.js'
 export { resolveProjectDir, loadEnvFile } from './core/config.js'
 export { computeSessionCost, findSessionJsonl } from './utils/cost-helper.js'

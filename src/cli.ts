@@ -34,8 +34,15 @@ Options:
 `)
 }
 
-function parseArgs(): { command: string; options: RunOptions } {
-  const args = process.argv.slice(2)
+function requireArg(args: string[], i: number, flag: string): string {
+  if (i >= args.length || args[i].startsWith('--')) {
+    throw new Error(`Missing value for ${flag}`)
+  }
+  return args[i]
+}
+
+export function parseArgs(argv: string[] = process.argv.slice(2)): { command: string; options: RunOptions } {
+  const args = argv
   const command = args[0] ?? 'run'
 
   let filter: string | undefined
@@ -53,25 +60,25 @@ function parseArgs(): { command: string; options: RunOptions } {
   for (let i = 1; i < args.length; i++) {
     switch (args[i]) {
       case '--filter':
-        filter = args[++i]
+        filter = requireArg(args, ++i, '--filter')
         break
       case '--verbose':
         verbose = true
         break
       case '--retries':
-        maxRetries = parseInt(args[++i], 10) || 1
+        maxRetries = parseInt(requireArg(args, ++i, '--retries'), 10) || 1
         break
       case '--base-url':
-        baseUrl = args[++i]
+        baseUrl = requireArg(args, ++i, '--base-url')
         break
       case '--model':
-        model = args[++i]
+        model = requireArg(args, ++i, '--model')
         break
       case '--budget':
-        budgetOverride = parseFloat(args[++i])
+        budgetOverride = parseFloat(requireArg(args, ++i, '--budget'))
         break
       case '--project-dir':
-        projectDirArg = args[++i]
+        projectDirArg = requireArg(args, ++i, '--project-dir')
         break
       case '--record':
         record = true
@@ -119,7 +126,10 @@ async function main() {
   process.exit(result.failedStories > 0 ? 1 : 0)
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err)
-  process.exit(2)
-})
+const isCLI = process.argv[1]?.endsWith('cli.js') || process.argv[1]?.endsWith('cli.ts')
+if (isCLI) {
+  main().catch((err) => {
+    console.error('Fatal error:', err)
+    process.exit(2)
+  })
+}

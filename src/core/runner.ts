@@ -58,17 +58,33 @@ function logArtifacts(artifacts: { screenshots: number; videos: number }) {
 // Retry wrapper
 // ---------------------------------------------------------------------------
 
-async function runFeatureWithRetries(
+export type RunTestFn = (prompt: string, options: DriverOptions) => Promise<TestResult>
+export type ComputeCostFn = (sessionId: string) => Promise<import('../types.js').CostInfo | null>
+
+export async function runFeatureWithRetries(
   basePrompt: string,
   driverOptions: DriverOptions,
   maxRetries: number,
+  _runTest: RunTestFn = runTest,
+  _computeCost: ComputeCostFn = computeSessionCost,
 ): Promise<TestResult> {
-  let lastResult: TestResult | null = null
+  if (maxRetries < 1) {
+    return {
+      passed: false,
+      reason: 'maxRetries must be >= 1',
+      steps: [],
+      bugs: [],
+      rawOutput: '',
+      durationMs: 0,
+    }
+  }
+
+  let lastResult!: TestResult
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let prompt = basePrompt
 
-    if (attempt > 1 && lastResult && !lastResult.passed) {
+    if (attempt > 1 && !lastResult.passed) {
       const ctx = [
         `## Previous Attempt (${attempt - 1}/${maxRetries}) Failed`,
         '',
@@ -84,7 +100,7 @@ async function runFeatureWithRetries(
     }
 
     try {
-      lastResult = await runTest(prompt, driverOptions)
+      lastResult = await _runTest(prompt, driverOptions)
     } catch (err) {
       lastResult = {
         passed: false,
@@ -97,7 +113,7 @@ async function runFeatureWithRetries(
     }
 
     if (lastResult.sessionId) {
-      const cost = await computeSessionCost(lastResult.sessionId)
+      const cost = await _computeCost(lastResult.sessionId)
       if (cost) {
         lastResult.cost = cost
         console.log(`  [cost] $${cost.totalCostUsd.toFixed(4)} (in: ${cost.inputTokens}, out: ${cost.outputTokens}, cache-w: ${cost.cacheCreationTokens}, cache-r: ${cost.cacheReadTokens}, model: ${cost.model})`)
@@ -107,7 +123,7 @@ async function runFeatureWithRetries(
     if (lastResult.passed) break
   }
 
-  return lastResult!
+  return lastResult
 }
 
 // ---------------------------------------------------------------------------
