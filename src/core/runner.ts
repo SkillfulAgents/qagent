@@ -185,6 +185,7 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
     filter,
     verbose,
     baseUrl,
+    parallel = 1,
     budgetOverride,
     projectDir,
     record,
@@ -202,6 +203,7 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   if (opts.headless) console.log(`Headless:    enabled`)
   console.log(`Base URL:    ${baseUrl}`)
   console.log(`Max retries: ${opts.maxRetries}`)
+  console.log(`Parallel:    ${Math.max(1, parallel)}`)
   console.log(`Verbose:     ${verbose}`)
   console.log(`Budget:      $${budget}/test\n`)
 
@@ -229,45 +231,26 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   const resultsDir = await resolveRunDir(baseResultsDir, runId, append)
 
   const suiteStart = Date.now()
-  const allResults: StoryResult[] = []
+  const effectiveParallel = Math.max(1, parallel)
+  const serialStories = stories.filter((s) => !canParallelizeStory(s))
+  const parallelStories = stories.filter((s) => canParallelizeStory(s))
 
-  for (const story of stories) {
-    console.log(`\n${'─'.repeat(60)}`)
-    console.log(`> [${story.id}] ${story.name} (${story.mode})`)
-    console.log(`${'─'.repeat(60)}`)
-
-    await cleanStoryResults(resultsDir, story)
-
-    const rc = await buildStoryRunContext(story, opts, systemPrompt, resultsDir, budget)
-    let setupOk = true
-    try {
-      if (story.setup && story.setup.length > 0) {
-        console.log(`\n[setup] ${story.setup.join(', ')}`)
-        try {
-          await runHooks(story.setup, rc.setupCtx, 'setup', () => applyStoreOverrides(rc))
-        } catch (err) {
-          setupOk = false
-          const reason = `Setup failed: ${err instanceof Error ? err.message : String(err)}`
-          console.error(`[setup] ${reason}`)
-          allResults.push({ story, featureResults: [], overallPassed: false })
-        }
-      }
-
-      if (setupOk) {
-        const result = await dispatchStory(rc)
-        allResults.push(result)
-      }
-    } finally {
-      if (story.teardown && story.teardown.length > 0) {
-        console.log(`\n[teardown] ${story.teardown.join(', ')}`)
-        try {
-          await runHooks(story.teardown, rc.setupCtx, 'teardown')
-        } catch (err) {
-          console.warn(`[teardown] Warning: ${err instanceof Error ? err.message : String(err)}`)
-        }
-      }
-    }
+  if (effectiveParallel > 1 && serialStories.length > 0) {
+    console.log(`[parallel] ${serialStories.length} story/stories forced to serial (chaos/electron).\n`)
   }
+  if (effectiveParallel > 1 && parallelStories.length > 1) {
+    console.log(`[parallel] Running ${parallelStories.length} web story/stories with concurrency ${effectiveParallel}.\n`)
+  }
+
+  const allResults: StoryResult[] = []
+  for (const story of serialStories) {
+    allResults.push(await runSingleStory(story, opts, systemPrompt, resultsDir, budget))
+  }
+
+  const parallelResults = await runWithConcurrency(parallelStories, effectiveParallel, async (story) =>
+    runSingleStory(story, opts, systemPrompt, resultsDir, budget),
+  )
+  allResults.push(...parallelResults)
 
   // --- Summary ---
   const suiteEnd = Date.now()
@@ -324,6 +307,81 @@ export async function run(opts: RunOptions): Promise<SuiteResult> {
   }
 
   return summary
+}
+
+function canParallelizeStory(story: Story): boolean {
+  if (story.mode === 'chaos-monkey') return false
+  const hasElectronHook = (story.setup ?? []).some((h) => /electron/i.test(h))
+  if (hasElectronHook) return false
+  return story.mode === 'happy-path' || story.mode === 'feature-test'
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return []
+  const limit = Math.max(1, concurrency)
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+
+  async function runWorker(): Promise<void> {
+    while (true) {
+      const index = cursor++
+      if (index >= items.length) return
+      results[index] = await worker(items[index], index)
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => runWorker())
+  await Promise.all(workers)
+  return results
+}
+
+async function runSingleStory(
+  story: Story,
+  opts: RunOptions,
+  systemPrompt: string,
+  resultsDir: string,
+  budget: number,
+): Promise<StoryResult> {
+  console.log(`\n${'─'.repeat(60)}`)
+  console.log(`> [${story.id}] ${story.name} (${story.mode})`)
+  console.log(`${'─'.repeat(60)}`)
+
+  await cleanStoryResults(resultsDir, story)
+
+  const rc = await buildStoryRunContext(story, opts, systemPrompt, resultsDir, budget)
+  let setupOk = true
+  try {
+    if (story.setup && story.setup.length > 0) {
+      console.log(`\n[setup] ${story.setup.join(', ')}`)
+      try {
+        await runHooks(story.setup, rc.setupCtx, 'setup', () => applyStoreOverrides(rc))
+      } catch (err) {
+        setupOk = false
+        const reason = `Setup failed: ${err instanceof Error ? err.message : String(err)}`
+        console.error(`[setup] ${reason}`)
+        return { story, featureResults: [], overallPassed: false }
+      }
+    }
+
+    if (setupOk) {
+      return await dispatchStory(rc)
+    }
+
+    return { story, featureResults: [], overallPassed: false }
+  } finally {
+    if (story.teardown && story.teardown.length > 0) {
+      console.log(`\n[teardown] ${story.teardown.join(', ')}`)
+      try {
+        await runHooks(story.teardown, rc.setupCtx, 'teardown')
+      } catch (err) {
+        console.warn(`[teardown] Warning: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

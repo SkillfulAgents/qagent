@@ -84,6 +84,7 @@ export interface RunOptions {
   filter?: string
   verbose: boolean
   maxRetries: number
+  parallel?: number
   baseUrl: string
   model?: string
   budgetOverride?: number

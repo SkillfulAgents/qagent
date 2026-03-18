@@ -27,6 +27,7 @@ Options:
   --filter <pattern>      Filter stories by id, name, or path (substring match)
   --verbose               Show full agent output
   --retries <n>           Max retries per feature (default: 1)
+  --parallel <n>          Max concurrent web stories (default: 1)
   --base-url <url>        Application base URL (default: http://localhost:3000)
   --model <model>         Claude model to use (default: sonnet)
   --budget <usd>          Per-test spending cap in USD
@@ -54,6 +55,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): { command: st
   let filter: string | undefined
   let verbose = false
   let maxRetries = 1
+  let parallel = 1
   let baseUrl = 'http://localhost:3000'
   let model: string | undefined
   let budgetOverride: number | undefined
@@ -74,6 +76,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): { command: st
         break
       case '--retries':
         maxRetries = parseInt(requireArg(args, ++i, '--retries'), 10) || 1
+        break
+      case '--parallel':
+        parallel = parseInt(requireArg(args, ++i, '--parallel'), 10) || 1
         break
       case '--base-url':
         baseUrl = requireArg(args, ++i, '--base-url')
@@ -110,10 +115,11 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): { command: st
   }
 
   const projectDir = resolveProjectDir(projectDirArg)
+  parallel = Math.max(1, parallel)
 
   return {
     command,
-    options: { filter, verbose, maxRetries, baseUrl, model, budgetOverride, projectDir, record, headless, dryRun, append, upload },
+    options: { filter, verbose, maxRetries, parallel, baseUrl, model, budgetOverride, projectDir, record, headless, dryRun, append, upload },
   }
 }
 
