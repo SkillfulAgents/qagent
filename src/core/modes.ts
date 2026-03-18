@@ -169,7 +169,8 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
     try {
       result = await runTest(prompt, {
         ...driverOptions,
-        outputDir: sessionDir,
+        outputDir: roundDir,
+        cwd: sessionDir,
         sessionId,
         resumeSessionId: isFirstRound ? undefined : sessionId,
       })

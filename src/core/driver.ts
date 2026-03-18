@@ -76,7 +76,7 @@ export async function runTest(
 
     const proc: ChildProcess = spawnFn('claude', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      cwd: options.outputDir,
+      cwd: options.cwd ?? options.outputDir,
       env: { ...process.env, DISABLE_INTERACTIVITY: '1' },
     })
 

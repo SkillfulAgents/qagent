@@ -76,6 +76,8 @@ export interface DriverOptions {
   headless?: boolean
   /** Directory where Playwright MCP stores screenshots and videos. Defaults to process.cwd(). */
   outputDir?: string
+  /** Working directory for the claude CLI process (session storage). Defaults to outputDir. */
+  cwd?: string
 }
 
 // ---------------------------------------------------------------------------
