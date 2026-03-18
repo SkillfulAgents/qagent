@@ -3,12 +3,14 @@
  * CLI entry point for qagent.
  *
  * Usage:
- *   npx qagent run [--filter <pattern>] [--verbose]
- *                   [--retries <n>] [--base-url <url>]
- *                   [--model <model>] [--budget <usd>] [--project-dir <path>]
+ *   npx qagent init  [--project-dir <path>]
+ *   npx qagent run   [--filter <pattern>] [--verbose]
+ *                     [--retries <n>] [--base-url <url>]
+ *                     [--model <model>] [--budget <usd>] [--project-dir <path>]
  */
 import { resolveProjectDir, loadEnvFile } from './core/config.js'
 import { run } from './core/runner.js'
+import { initProject, printInitResult } from './core/init.js'
 import type { RunOptions } from './types.js'
 
 function printHelp(): void {
@@ -16,7 +18,8 @@ function printHelp(): void {
 qagent — Agentic E2E testing framework
 
 Usage:
-  qagent run [options]
+  qagent init [options]       Scaffold a new project directory
+  qagent run  [options]       Run tests
 
 Options:
   --filter <pattern>      Filter stories by id, name, or path (substring match)
@@ -107,19 +110,35 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): { command: st
   }
 }
 
-async function main() {
-  const { command, options } = parseArgs()
+function getProjectDirArg(argv: string[]): string {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--project-dir' && i + 1 < argv.length) return argv[i + 1]
+  }
+  return './qagent'
+}
 
-  if (command === 'help' || command === '--help') {
+async function main() {
+  const argv = process.argv.slice(2)
+  const command = argv[0] ?? 'run'
+
+  if (command === 'help' || command === '--help' || command === '-h') {
     printHelp()
     process.exit(0)
   }
 
+  if (command === 'init') {
+    const dir = getProjectDirArg(argv)
+    const result = await initProject(dir)
+    printInitResult(result)
+    process.exit(0)
+  }
+
   if (command !== 'run') {
-    console.error(`Unknown command: ${command}. Use "qagent run" or "qagent --help".`)
+    console.error(`Unknown command: ${command}. Use "qagent init", "qagent run", or "qagent --help".`)
     process.exit(1)
   }
 
+  const { options } = parseArgs(argv)
   loadEnvFile(options.projectDir)
 
   const result = await run(options)

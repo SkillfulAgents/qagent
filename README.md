@@ -33,21 +33,15 @@ The runner loads your YAML stories, builds tailored prompts for each test mode, 
 # 1. Install from GitHub
 npm install github:SkillfulAgents/qagent
 
-# 2. Create a project directory with a story
-mkdir -p my-tests/stories
+# 2. Scaffold a project
+npx qagent init --project-dir ./my-tests
 
-# 3. Write a story (my-tests/stories/smoke.yaml)
-cat > my-tests/stories/smoke.yaml << 'EOF'
-id: homepage-smoke
-name: "Homepage smoke test"
-mode: happy-path
-steps: |
-  1. Navigate to https://example.com
-  2. Verify the page title is visible
-  3. Take a screenshot
-EOF
+# 3. Add your API key
+echo "ANTHROPIC_API_KEY=sk-ant-..." > ./my-tests/.env.local
 
-# 4. Run
+# 4. Edit the generated story (my-tests/stories/smoke.yaml) with your app's URL
+
+# 5. Run
 npx qagent run --project-dir ./my-tests
 ```
 
