@@ -30,11 +30,11 @@ The runner loads your YAML stories, builds tailored prompts for each test mode, 
 **Prerequisites:** Node.js >= 20, `claude` CLI installed and authenticated.
 
 ```bash
-# 1. Install
-npm install qagent
+# 1. Install from GitHub
+npm install github:SkillfulAgents/qagent
 
 # 2. Create a project directory with a story
-mkdir -p my-tests/stories my-tests/features
+mkdir -p my-tests/stories
 
 # 3. Write a story (my-tests/stories/smoke.yaml)
 cat > my-tests/stories/smoke.yaml << 'EOF'
@@ -282,6 +282,7 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - run: npm install github:SkillfulAgents/qagent
       - run: npm start &  # start your app
       - run: npx qagent run --project-dir ./e2e --upload
         env:
