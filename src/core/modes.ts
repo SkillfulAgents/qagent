@@ -20,6 +20,7 @@ import { parseChaosOutput } from '../prompt/output-parser.js'
 import { runTest, waitForMcpDrain } from './driver.js'
 import { runFeatureWithRetries } from './runner.js'
 import { writeReportJson, countArtifacts, logArtifacts, printFeatureResult } from './reporter.js'
+import { computeSessionCost } from '../utils/cost-helper.js'
 
 // ---------------------------------------------------------------------------
 // Mode: happy-path with explicit steps
@@ -184,6 +185,14 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
       console.warn(`[chaos-monkey] Reason: ${result.reason ?? 'unknown'}`)
       chaosResults.push({ feature: `round-${round}`, result })
       break
+    }
+
+    if (result.sessionId) {
+      const cost = await computeSessionCost(result.sessionId)
+      if (cost) {
+        result.cost = cost
+        console.log(`  [cost] $${cost.totalCostUsd.toFixed(4)} (in: ${cost.inputTokens}, out: ${cost.outputTokens}, cache-w: ${cost.cacheCreationTokens}, cache-r: ${cost.cacheReadTokens}, model: ${cost.model})`)
+      }
     }
 
     await writeFile(resolve(roundDir, 'report.md'), result.rawOutput, 'utf-8')
