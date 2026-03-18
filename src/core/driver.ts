@@ -89,11 +89,16 @@ export async function runTest(
 
     const activityCheck = setInterval(() => {
       console.log(`[health] agent processing... (${Math.round((Date.now() - startTime) / 1000)}s)`)
-    }, 60000)
+    }, 30000)
 
+    let firstOutputLogged = false
     proc.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stdout += text
+      if (!firstOutputLogged) {
+        firstOutputLogged = true
+        console.log(`[driver] First output after ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
+      }
       if (verbose) process.stderr.write(text)
     })
 

@@ -36,6 +36,7 @@ export async function runHooks(
     }
 
     console.log(`  [${label}] Running ${name}...`)
+    const hookStart = Date.now()
     try {
       const mod = await import(hookPath)
       const fn: SetupHookFn = mod.default ?? mod[name]
@@ -43,6 +44,7 @@ export async function runHooks(
         throw new Error(`Hook "${name}" does not export a default function`)
       }
       await fn(ctx)
+      console.log(`  [${label}] ${name} done (${((Date.now() - hookStart) / 1000).toFixed(1)}s)`)
       afterEach?.()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
