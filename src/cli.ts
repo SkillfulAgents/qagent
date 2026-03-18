@@ -160,7 +160,8 @@ async function main() {
   process.exit(result.failedStories > 0 ? 1 : 0)
 }
 
-const isCLI = process.argv[1]?.endsWith('cli.js') || process.argv[1]?.endsWith('cli.ts')
+const entryScript = process.argv[1] ?? ''
+const isCLI = /(?:cli\.[jt]s|qagent(?:\.mjs)?)$/.test(entryScript)
 if (isCLI) {
   main().catch((err) => {
     console.error('Fatal error:', err)
