@@ -83,6 +83,7 @@ export async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
       projectDir: setupCtx.projectDir,
       featureName: feat,
       baseUrl: setupCtx.baseUrl,
+      skipNavigation: !!driverOptions.mcpConfigPath,
     })
 
     if (driverOptions.verbose) console.log('[prompt]\n' + prompt + '\n')

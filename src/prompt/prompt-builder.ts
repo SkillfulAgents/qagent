@@ -100,6 +100,8 @@ export interface FeaturePromptOptions {
   baseUrl: string
   appName?: string
   contextHint?: string
+  /** When true, skip the "Navigate to <url>" instruction (e.g. Electron/CDP). */
+  skipNavigation?: boolean
 }
 
 export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<string> {
@@ -109,12 +111,17 @@ export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<st
     baseUrl,
     appName = 'the application',
     contextHint = '',
+    skipNavigation = false,
   } = opts
 
   const featureContent = await loadFeatureFile(projectDir, featureName)
 
-  const appDescription = `a web app called ${appName} at ${baseUrl}`
-  const navigationInstruction = `Navigate to ${baseUrl}.`
+  const appDescription = skipNavigation
+    ? `a desktop application called ${appName} (already open — do NOT navigate away from the current page)`
+    : `a web app called ${appName} at ${baseUrl}`
+  const navigationInstruction = skipNavigation
+    ? 'The application is already open in the browser. Take a screenshot first to see the current state. Do NOT use browser_navigate — stay on the current page.'
+    : `Navigate to ${baseUrl}.`
 
   const taskInstructions = `Test the following feature area thoroughly. The description below is a **hint and reference** — it tells you what exists and roughly how to find it, but it is NOT a rigid script. You should:
 
