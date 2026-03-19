@@ -149,7 +149,10 @@ async function ensureDefaultMcpConfig(record?: boolean, outputDir?: string, head
   const effectiveHeadless = headless ?? false
   const mcpArgs = [resolvePlaywrightMcpBin(), `--output-dir=${outputDir ?? process.cwd()}`]
   if (effectiveHeadless) mcpArgs.push('--headless')
-  if (record) mcpArgs.push('--save-video=1280x720')
+  if (record) {
+    mcpArgs.push('--save-video=1280x720')
+    mcpArgs.push('--viewport-size=1280,720')
+  }
 
   const config = { mcpServers: { playwright: { command: 'node', args: mcpArgs } } }
   const tmpPath = resolve(tmpdir(), `qagent-mcp-${randomUUID()}.json`)
