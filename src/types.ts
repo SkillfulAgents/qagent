@@ -62,7 +62,6 @@ export interface TestResult {
 
 export interface DriverOptions {
   systemPrompt?: string
-  mcpConfigPath?: string
   model?: string
   verbose?: boolean
   timeoutMs?: number
@@ -70,11 +69,15 @@ export interface DriverOptions {
   sessionId?: string
   maxTurns?: number
   maxBudgetUsd?: number
-  /** Enable video recording via Playwright MCP --save-video. */
+  /** Record the browser to <outputDir>/video.webm (needs ffmpeg on PATH). */
   record?: boolean
-  /** Run browser in headless mode. Defaults to true when DISPLAY env var is absent (CI). */
+  /** Run the browser headless. Defaults to a visible window. */
   headless?: boolean
-  /** Directory where Playwright MCP stores screenshots and videos. Defaults to process.cwd(). */
+  /** Page the browser opens before the agent starts. Defaults to about:blank. */
+  startUrl?: string
+  /** Attach to a running browser or Electron app over CDP instead of launching one. */
+  cdpUrl?: string
+  /** Directory where screenshots and videos are saved. Defaults to process.cwd(). */
   outputDir?: string
   /** Working directory for the claude CLI process (session storage). Defaults to outputDir. */
   cwd?: string
@@ -93,7 +96,7 @@ export interface RunOptions {
   model?: string
   budgetOverride?: number
   projectDir: string
-  /** Enable video recording via Playwright MCP --save-video. */
+  /** Record a video of each browser session (needs ffmpeg on PATH). */
   record?: boolean
   /** Append to existing run results instead of overwriting (adds numeric suffix). */
   append?: boolean

@@ -147,8 +147,8 @@ async function buildStoryRunContext(
 
 function applyStoreOverrides(rc: StoryRunContext): void {
   const { store } = rc.setupCtx
-  if (store.has('mcpConfigPath')) {
-    rc.driverOptions.mcpConfigPath = store.get('mcpConfigPath') as string
+  if (store.has('cdpUrl')) {
+    rc.driverOptions.cdpUrl = store.get('cdpUrl') as string
   }
   if (store.has('baseUrl')) {
     rc.setupCtx.baseUrl = store.get('baseUrl') as string

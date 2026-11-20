@@ -17,7 +17,7 @@ import {
   buildChaosFollowUpPrompt,
 } from '../prompt/prompt-builder.js'
 import { judgeChaosOutput } from '../prompt/judge.js'
-import { runTest, waitForMcpDrain } from './driver.js'
+import { runTest } from './driver.js'
 import { runFeatureWithRetries } from './runner.js'
 import { writeReportJson, countArtifacts, logArtifacts, printFeatureResult } from './reporter.js'
 import { computeSessionCost } from '../utils/cost-helper.js'
@@ -49,7 +49,7 @@ export async function runSteps(rc: StoryRunContext): Promise<StoryResult> {
 
   if (driverOptions.verbose) console.log('[prompt]\n' + prompt + '\n')
 
-  const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: storyDir }, maxRetries)
+  const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: storyDir, startUrl: setupCtx.baseUrl }, maxRetries)
 
   await writeFile(resolve(storyDir, 'report.md'), result.rawOutput, 'utf-8')
   await writeReportJson(storyDir, story.id, null, result)
@@ -77,11 +77,6 @@ export async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
   for (let fi = 0; fi < features.length; fi++) {
     const feat = features[fi]
 
-    if (fi > 0) {
-      console.log(`\n[drain] Waiting for previous MCP session to release...`)
-      await waitForMcpDrain()
-    }
-
     console.log(`\n> Running feature [${fi + 1}/${features.length}]: ${feat}...`)
 
     const featDir = resolve(resultsDir, 'feature-test', story.id, feat)
@@ -91,12 +86,12 @@ export async function runFeatures(rc: StoryRunContext): Promise<StoryResult> {
       projectDir: setupCtx.projectDir,
       featureName: feat,
       baseUrl: setupCtx.baseUrl,
-      skipNavigation: !!driverOptions.mcpConfigPath,
+      skipNavigation: !!driverOptions.cdpUrl,
     })
 
     if (driverOptions.verbose) console.log('[prompt]\n' + prompt + '\n')
 
-    const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: featDir }, maxRetries)
+    const result = await runFeatureWithRetries(prompt, { ...driverOptions, outputDir: featDir, startUrl: setupCtx.baseUrl }, maxRetries)
     featureResults.push({ feature: feat, result })
 
     await writeFile(resolve(featDir, 'report.md'), result.rawOutput, 'utf-8')
@@ -171,6 +166,7 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
       result = await runTest(prompt, {
         ...driverOptions,
         outputDir: roundDir,
+        startUrl: setupCtx.baseUrl,
         cwd: sessionDir,
         sessionId,
         resumeSessionId: isFirstRound ? undefined : sessionId,
