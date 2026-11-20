@@ -1,27 +1,46 @@
 /**
- * Claude Code CLI driver — spawns the `claude` CLI and captures output.
+ * Claude Code CLI driver — opens an agent-browser session, spawns the
+ * `claude` CLI against it and captures output.
  * Prompt construction lives in prompt-builder.ts.
  */
-import { spawn, execSync, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { writeFile, unlink } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
 import type { DriverOptions, TestResult } from '../types.js'
 import { judgeFeatureOutput } from '../prompt/judge.js'
+import { createBrowserSession, type BrowserSession, type SpawnFn } from './browser.js'
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000
 const DEFAULT_MODEL = 'sonnet'
 const DEFAULT_MAX_BUDGET_USD = 5
 
-export type SpawnFn = (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess
+export type { SpawnFn }
 
 export async function runTest(
   testPrompt: string,
   options: DriverOptions = {},
   spawnFn: SpawnFn = spawn,
+): Promise<TestResult> {
+  const browser = createBrowserSession({
+    outputDir: options.outputDir ?? process.cwd(),
+    headless: options.headless,
+    cdpUrl: options.cdpUrl,
+  }, spawnFn)
+  try {
+    await browser.start({ url: options.startUrl, record: options.record })
+    return await runClaude(testPrompt, options, browser, spawnFn)
+  } finally {
+    await browser.stop()
+  }
+}
+
+async function runClaude(
+  testPrompt: string,
+  options: DriverOptions,
+  browser: BrowserSession,
+  spawnFn: SpawnFn,
 ): Promise<TestResult> {
   const {
     model = DEFAULT_MODEL,
@@ -35,8 +54,8 @@ export async function runTest(
   const sessionId = options.sessionId ?? randomUUID()
   const startTime = Date.now()
 
-  const mcpConfigPath = options.mcpConfigPath ?? await ensureDefaultMcpConfig(options.record, options.outputDir, options.headless)
-  const ownsMcpConfig = !options.mcpConfigPath
+  const mcpConfigPath = resolve(tmpdir(), `qagent-mcp-${randomUUID()}.json`)
+  await writeFile(mcpConfigPath, JSON.stringify(browser.mcpConfig(), null, 2), 'utf-8')
 
   const args: string[] = [
     '-p', testPrompt,
@@ -62,7 +81,7 @@ export async function runTest(
   if (maxTurns) args.push('--max-turns', String(maxTurns))
 
   console.warn(`[driver] Running with --dangerously-skip-permissions (required for non-interactive automation)`)
-  if (options.mcpConfigPath) console.log(`[driver] MCP config: ${options.mcpConfigPath}`)
+  console.log(`[driver] Browser session: ${browser.env.AGENT_BROWSER_SESSION}`)
   if (resumeSessionId) {
     console.log(`[driver] Resuming session ${resumeSessionId} (model: ${model})...`)
   } else {
@@ -77,7 +96,7 @@ export async function runTest(
     const proc: ChildProcess = spawnFn('claude', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: options.cwd ?? options.outputDir,
-      env: { ...process.env, DISABLE_INTERACTIVITY: '1' },
+      env: { ...process.env, ...browser.env, DISABLE_INTERACTIVITY: '1' },
     })
 
     if (proc.pid) console.log(`[driver] Process spawned, PID: ${proc.pid}`)
@@ -112,9 +131,8 @@ export async function runTest(
 
     const cleanup = () => {
       clearInterval(activityCheck)
-      if (proc.pid) killOrphanMcpProcesses(proc.pid)
       if (systemPromptFile) unlink(systemPromptFile).catch(() => {})
-      if (ownsMcpConfig) unlink(mcpConfigPath).catch(() => {})
+      unlink(mcpConfigPath).catch(() => {})
     }
 
     proc.on('error', (err) => {
@@ -143,62 +161,4 @@ export async function runTest(
       judgeFeatureOutput(stdout).then((parsed) => resolvePromise({ ...parsed, rawOutput: stdout, durationMs, sessionId }))
     })
   })
-}
-
-async function ensureDefaultMcpConfig(record?: boolean, outputDir?: string, headless?: boolean): Promise<string> {
-  const effectiveHeadless = headless ?? false
-  const mcpArgs = [resolvePlaywrightMcpBin(), `--output-dir=${outputDir ?? process.cwd()}`]
-  if (effectiveHeadless) mcpArgs.push('--headless')
-  if (record) {
-    mcpArgs.push('--save-video=1280x720')
-    mcpArgs.push('--viewport-size=1280,720')
-  }
-
-  const config = { mcpServers: { playwright: { command: 'node', args: mcpArgs } } }
-  const tmpPath = resolve(tmpdir(), `qagent-mcp-${randomUUID()}.json`)
-  const configJson = JSON.stringify(config, null, 2)
-  console.log(`[driver] MCP config:\n${configJson}`)
-  await writeFile(tmpPath, configJson, 'utf-8')
-  return tmpPath
-}
-
-function resolvePlaywrightMcpBin(): string {
-  const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-  const local = resolve(packageRoot, 'node_modules', '@playwright', 'mcp', 'cli.js')
-  if (existsSync(local)) return local
-  const hoisted = resolve(packageRoot, '..', '@playwright', 'mcp', 'cli.js')
-  if (existsSync(hoisted)) return hoisted
-  throw new Error('Cannot resolve @playwright/mcp/cli.js. Run "npm install" in qagent.')
-}
-
-/**
- * After a Claude CLI process exits, its MCP server child (Playwright) may
- * linger as an orphan. If multiple MCP instances attach to the same CDP
- * endpoint they fight over the browser and crash Electron.
- *
- * We use `pgrep -P <pid>` to find direct children of the Claude process
- * and kill them. This is best-effort — if the process tree is already
- * cleaned up, we silently ignore errors.
- */
-function killOrphanMcpProcesses(claudePid: number): void {
-  try {
-    const children = execSync(`pgrep -P ${claudePid}`, { encoding: 'utf-8' }).trim()
-    if (!children) return
-    for (const pidStr of children.split('\n')) {
-      const pid = parseInt(pidStr, 10)
-      if (!pid || pid === claudePid) continue
-      try {
-        process.kill(pid, 'SIGTERM')
-        console.log(`[driver] Killed orphan child process ${pid} (parent: ${claudePid})`)
-      } catch { /* already exited */ }
-    }
-  } catch { /* pgrep failed = no children, fine */ }
-}
-
-/**
- * Waits for any MCP/Playwright processes attached to a CDP endpoint to
- * fully exit. Called between features to avoid overlapping sessions.
- */
-export async function waitForMcpDrain(delayMs = 1500): Promise<void> {
-  await new Promise((r) => setTimeout(r, delayMs))
 }

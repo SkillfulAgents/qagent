@@ -32,12 +32,12 @@
     "testing",
     "agentic",
     "claude",
-    "playwright",
+    "agent-browser",
     "mcp"
   ],
   "license": "MIT",
   "dependencies": {
-    "@playwright/mcp": "^0.0.68",
+    "agent-browser": "0.41.2",
     "js-yaml": "^4.1.0",
     "tsx": "^4.19.0"
   },

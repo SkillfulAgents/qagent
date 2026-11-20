@@ -12,7 +12,7 @@ qagent works by:
 1. Reading YAML **story** files that define what to test
 2. Reading markdown **feature spec** files that describe UI and expected behavior
 3. Building prompts from these files and sending them to an AI agent with browser access
-4. The agent interacts with the real application via Playwright and reports structured results
+4. The agent interacts with the real application via agent-browser and reports structured results
 
 ### Project Directory Structure
 

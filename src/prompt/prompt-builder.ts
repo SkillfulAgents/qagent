@@ -121,7 +121,7 @@ export async function buildFeaturePrompt(opts: FeaturePromptOptions): Promise<st
     ? `a desktop application called ${appName} (already open — do NOT navigate away from the current page)`
     : `a web app called ${appName} at ${baseUrl}`
   const navigationInstruction = skipNavigation
-    ? 'The application is already open in the browser. Take a screenshot first to see the current state. Do NOT use browser_navigate — stay on the current page.'
+    ? 'The application is already open in the browser. Take a screenshot first to see the current state. Do NOT use agent_browser_open — stay on the current page.'
     : `Navigate to ${baseUrl}.`
 
   const taskInstructions = `Test the following feature area thoroughly. The description below is a **hint and reference** — it tells you what exists and roughly how to find it, but it is NOT a rigid script. You should:
@@ -198,11 +198,11 @@ export async function buildStepsPrompt(opts: StepsPromptOptions): Promise<string
     }
   }
 
-  return `You are a senior QA engineer. You MUST use the Playwright browser tools (browser_navigate, browser_click, browser_type, browser_snapshot, browser_take_screenshot, etc.) to perform all actions in a real browser. Do NOT use WebFetch, WebSearch, or any non-browser tool.
+  return `You are a senior QA engineer. You MUST use the agent-browser tools (agent_browser_open, agent_browser_snapshot, agent_browser_click, agent_browser_fill, agent_browser_screenshot, etc.) to perform all actions in a real browser. Do NOT use WebFetch, WebSearch, or any non-browser tool.
 ${contextSection}
 ## Task
 
-Execute the following steps **exactly as written** using the Playwright browser tools. Do not explore beyond them. Do not improvise additional actions. Take a screenshot after each key step.
+Execute the following steps **exactly as written** using the agent-browser tools. Do not explore beyond them. Do not improvise additional actions. Take a screenshot after each key step.
 
 If a step fails or produces unexpected results, document it as a bug and **continue with the remaining steps**.
 

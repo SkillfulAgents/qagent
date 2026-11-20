@@ -14,7 +14,7 @@ stories/*.yaml          YAML test definitions (what to test)
        │  builds prompt
        ▼
   ┌──────────┐
-  │  Driver   │──► spawns `claude` CLI with Playwright MCP
+  │  Driver   │──► opens an agent-browser session, spawns `claude` CLI with `agent-browser mcp`
   └────┬─────┘
        │  final report (free text + [BUG_FOUND], [STEP], ... lines)
        ▼
@@ -23,15 +23,16 @@ stories/*.yaml          YAML test definitions (what to test)
   └──────────┘    (verdict from OpenAI Decisions, or from markers)
 ```
 
-The runner loads your YAML stories, builds tailored prompts for each test mode, spawns the Claude CLI with a Playwright MCP browser, and turns the agent's final report into machine-readable results.
+The runner loads your YAML stories, builds tailored prompts for each test mode, opens an [agent-browser](https://github.com/vercel-labs/agent-browser) session, spawns the Claude CLI with the `agent-browser mcp` tools, and turns the agent's final report into machine-readable results.
 
 ## Quick Start
 
-**Prerequisites:** Node.js >= 20, `claude` CLI installed and authenticated.
+**Prerequisites:** Node.js >= 20, `claude` CLI installed and authenticated. `--record` also needs `ffmpeg` on `PATH`.
 
 ```bash
-# 1. Install from GitHub
+# 1. Install from GitHub, then download Chrome for Testing for agent-browser
 npm install github:SkillfulAgents/qagent
+npx agent-browser install   # on Linux: npx agent-browser install --with-deps
 
 # 2. Scaffold a project
 npx qagent init --project-dir ./my-tests
@@ -173,7 +174,7 @@ qagent run [options]
 | `--model <model>` | Model to use | `sonnet` |
 | `--budget <usd>` | Per-test spending cap in USD | `5` |
 | `--project-dir <path>` | Path to project directory | `./qagent` |
-| `--record` | Record video of browser sessions | `false` |
+| `--record` | Record video of browser sessions (needs `ffmpeg`) | `false` |
 | `--append` | Append results instead of overwriting | `false` |
 | `--upload` | Upload results to GitHub Artifacts | `false` |
 
@@ -193,6 +194,11 @@ export default async function(ctx: SetupContext): Promise<void> {
   await fetch(`${ctx.baseUrl}/api/seed`, { method: 'POST' })
 }
 ```
+
+Two store keys change how the run starts:
+
+- `baseUrl` replaces the story's base URL.
+- `cdpUrl` (a CDP port or WebSocket URL) attaches the browser to a running Chrome or Electron app instead of launching one. QAgent then does not open a page, and the prompt tells the agent to stay on the current page.
 
 Reference hooks by filename (without extension) in your story's `setup` and `teardown` arrays:
 
@@ -231,7 +237,7 @@ results/
       login-smoke/
         report.md                  # raw agent output (human-readable)
         report.json                # structured result (machine-readable)
-        *.png / *.webm             # screenshots / videos written by MCP
+        *.png / video.webm         # screenshots / video written by agent-browser
     feature-test/
       dashboard-deep/
         dashboard/
@@ -280,6 +286,7 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm install github:SkillfulAgents/qagent
+      - run: npx agent-browser install --with-deps
       - run: npm start &  # start your app
       - run: npx qagent run --project-dir ./e2e --upload
         env:
@@ -308,7 +315,7 @@ Without the key, or when the Decisions call fails, the verdict comes from the ma
 
 ### Permissions
 
-QAgent runs the Claude CLI with `--dangerously-skip-permissions` to enable fully non-interactive automation. This means the agent can invoke any MCP tool without manual confirmation. By default only Playwright browser tools are available, but if you provide a custom `mcpConfigPath` with additional MCP servers, be aware that the agent will have unrestricted access to all of them.
+QAgent runs the Claude CLI with `--dangerously-skip-permissions` to enable fully non-interactive automation. This means the agent can invoke any MCP tool without manual confirmation. The only MCP server is `agent-browser mcp` with the `core,tabs` tool profiles, so the agent can drive the browser but has no other MCP tools.
 
 ### Budget Control
 
