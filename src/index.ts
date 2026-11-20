@@ -11,6 +11,7 @@ export { runHooks } from './loader/hook-loader.js'
 
 export { buildFeaturePrompt, buildStepsPrompt, buildChaosPrompt, buildSystemPrompt } from './prompt/prompt-builder.js'
 export { parseFeatureOutput, parseChaosOutput } from './prompt/output-parser.js'
+export { judgeFeatureOutput, judgeChaosOutput } from './prompt/judge.js'
 
 
 export type {

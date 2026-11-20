@@ -8,6 +8,9 @@
  *   [NO_BUG_FOUND]             — chaos-monkey mode
  *   [STEP] <text>
  *   [ACTION] / [EXPECTED] / [ACTUAL]  — chaos-monkey detail lines
+ *
+ * The verdict markers are used only when the Decisions API is not configured
+ * (see judge.ts); the detail lines are read in both cases.
  */
 
 export interface ParsedOutput {
@@ -17,34 +20,46 @@ export interface ParsedOutput {
   bugs: string[]
 }
 
+export interface ReportDetails {
+  earlyStop: string | null
+  reason: string
+  steps: string[]
+  bugs: string[]
+}
+
+function markerLines(output: string, marker: string): string[] {
+  return [...output.matchAll(new RegExp(`^\\[${marker}\\]\\s*(.+)$`, 'gm'))].map((m) => m[1].trim())
+}
+
+export function extractReportDetails(output: string): ReportDetails {
+  return {
+    earlyStop: markerLines(output, 'EARLY_STOP')[0] ?? null,
+    reason: markerLines(output, 'REASON')[0] ?? '',
+    steps: markerLines(output, 'STEP'),
+    bugs: markerLines(output, 'BUG_FOUND'),
+  }
+}
+
+export function withBugList(reason: string, bugs: string[]): string {
+  if (bugs.length === 0) return reason
+  return `${reason}\n  Bugs found:\n${bugs.map((b) => `    - ${b}`).join('\n')}`
+}
+
 export function parseFeatureOutput(output: string): ParsedOutput {
-  const earlyStopMatch = output.match(/^\[EARLY_STOP\]\s*(.+)$/m)
-  if (earlyStopMatch) {
-    const stepLines = [...output.matchAll(/^\[STEP\]\s*(.+)$/gm)].map((m) => m[1].trim())
-    return {
-      passed: false,
-      reason: `Early stop: ${earlyStopMatch[1].trim()}`,
-      steps: stepLines,
-      bugs: [],
-    }
+  const details = extractReportDetails(output)
+  if (details.earlyStop) {
+    return { passed: false, reason: `Early stop: ${details.earlyStop}`, steps: details.steps, bugs: [] }
   }
 
   const passMatch = output.match(/^\[TEST_PASS\]/m)
   const failMatch = output.match(/^\[TEST_FAIL\]/m)
-  const reasonMatch = output.match(/^\[REASON\]\s*(.+)$/m)
-  const bugLines = [...output.matchAll(/^\[BUG_FOUND\]\s*(.+)$/gm)].map((m) => m[1].trim())
-  const stepLines = [...output.matchAll(/^\[STEP\]\s*(.+)$/gm)].map((m) => m[1].trim())
 
   if (passMatch || failMatch) {
     if (passMatch && failMatch) {
       console.warn('[parser] Both [TEST_PASS] and [TEST_FAIL] markers found — treating as FAIL.')
     }
     const passed = !!passMatch && !failMatch
-    let reason = reasonMatch ? reasonMatch[1].trim() : ''
-    if (bugLines.length > 0) {
-      reason += `\n  Bugs found:\n${bugLines.map((b) => `    - ${b}`).join('\n')}`
-    }
-    return { passed, reason, steps: stepLines, bugs: bugLines }
+    return { passed, reason: withBugList(details.reason, details.bugs), steps: details.steps, bugs: details.bugs }
   }
 
   return {
@@ -57,15 +72,12 @@ export function parseFeatureOutput(output: string): ParsedOutput {
 
 export interface ChaosRoundResult {
   bugFound: string | null
-  noBugMarker: boolean
+  noBug: boolean
 }
 
 export function parseChaosOutput(output: string): ChaosRoundResult {
-  const bugMatch = output.match(/^\[BUG_FOUND\]\s*(.+)$/m)
-  const noBugMatch = output.match(/^\[NO_BUG_FOUND\]/m)
-
   return {
-    bugFound: bugMatch ? bugMatch[1].trim() : null,
-    noBugMarker: !!noBugMatch,
+    bugFound: markerLines(output, 'BUG_FOUND')[0] ?? null,
+    noBug: /^\[NO_BUG_FOUND\]/m.test(output),
   }
 }

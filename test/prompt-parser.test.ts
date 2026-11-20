@@ -61,11 +61,11 @@ describe('parseChaosOutput', () => {
   it('extracts bug and no-bug marker status', () => {
     const bug = parseChaosOutput('[BUG_FOUND] dashboard crashes on refresh')
     expect(bug.bugFound).toBe('dashboard crashes on refresh')
-    expect(bug.noBugMarker).toBe(false)
+    expect(bug.noBug).toBe(false)
 
     const noBug = parseChaosOutput('[NO_BUG_FOUND]')
     expect(noBug.bugFound).toBeNull()
-    expect(noBug.noBugMarker).toBe(true)
+    expect(noBug.noBug).toBe(true)
   })
 })
 

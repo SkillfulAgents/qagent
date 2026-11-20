@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import type { DriverOptions, TestResult } from '../types.js'
-import { parseFeatureOutput } from '../prompt/output-parser.js'
+import { judgeFeatureOutput } from '../prompt/judge.js'
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000
 const DEFAULT_MODEL = 'sonnet'
@@ -140,7 +140,7 @@ export async function runTest(
         return
       }
 
-      resolvePromise({ ...parseFeatureOutput(stdout), rawOutput: stdout, durationMs, sessionId })
+      judgeFeatureOutput(stdout).then((parsed) => resolvePromise({ ...parsed, rawOutput: stdout, durationMs, sessionId }))
     })
   })
 }
