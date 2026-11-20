@@ -16,14 +16,14 @@ stories/*.yaml          YAML test definitions (what to test)
   ┌──────────┐
   │  Driver   │──► spawns `claude` CLI with Playwright MCP
   └────┬─────┘
-       │  structured output ([TEST_PASS], [BUG_FOUND], ...)
+       │  final report (free text + [BUG_FOUND], [STEP], ... lines)
        ▼
   ┌──────────┐
-  │  Parser   │──► results/summary.json + reports + screenshots + videos
-  └──────────┘
+  │  Judge    │──► results/summary.json + reports + screenshots + videos
+  └──────────┘    (verdict from OpenAI Decisions, or from markers)
 ```
 
-The runner loads your YAML stories, builds tailored prompts for each test mode, spawns the Claude CLI with a Playwright MCP browser, and parses the structured output into machine-readable results.
+The runner loads your YAML stories, builds tailored prompts for each test mode, spawns the Claude CLI with a Playwright MCP browser, and turns the agent's final report into machine-readable results.
 
 ## Quick Start
 
@@ -296,8 +296,15 @@ Create `.env.local` in your project directory (or the working directory). Variab
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...          # optional, see "Verdicts" below
 APP_SECRET=test-secret
 ```
+
+### Verdicts
+
+When `OPENAI_API_KEY` is set, QAgent sends the agent's final report to [OpenAI Decisions](https://platform.openai.com/docs/guides/decisions) (`gpt-6-luna`) and asks yes/no questions: did the test pass, did the agent stop early, did a chaos round find a new bug. The report can be free text, so you can change the prompts without keeping the exact `[TEST_PASS]` / `[TEST_FAIL]` / `[NO_BUG_FOUND]` format. Set `OPENAI_BASE_URL` to send the request through a compatible proxy.
+
+Without the key, or when the Decisions call fails, the verdict comes from the markers as before. In both cases the reason, steps and bug text come from the `[REASON]`, `[STEP]` and `[BUG_FOUND]` lines.
 
 ### Permissions
 

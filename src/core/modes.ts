@@ -16,7 +16,7 @@ import {
   buildChaosPrompt,
   buildChaosFollowUpPrompt,
 } from '../prompt/prompt-builder.js'
-import { parseChaosOutput } from '../prompt/output-parser.js'
+import { judgeChaosOutput } from '../prompt/judge.js'
 import { runTest, waitForMcpDrain } from './driver.js'
 import { runFeatureWithRetries } from './runner.js'
 import { writeReportJson, countArtifacts, logArtifacts, printFeatureResult } from './reporter.js'
@@ -198,12 +198,12 @@ export async function runChaosMonkey(rc: StoryRunContext): Promise<StoryResult> 
     await writeFile(resolve(roundDir, 'report.md'), result.rawOutput, 'utf-8')
     await writeReportJson(roundDir, story.id, `round-${round}`, result)
 
-    const parsed = parseChaosOutput(result.rawOutput)
+    const parsed = await judgeChaosOutput(result.rawOutput)
 
     if (parsed.bugFound) {
       bugsFound.push(parsed.bugFound)
       console.log(`  [BUG #${bugsFound.length}] ${parsed.bugFound}`)
-    } else if (parsed.noBugMarker) {
+    } else if (parsed.noBug) {
       console.log(`  [NO BUG] Agent found no new bugs this round.`)
     } else {
       console.log(`  [WARN] No [BUG_FOUND] or [NO_BUG_FOUND] marker found.`)

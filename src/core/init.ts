@@ -46,6 +46,9 @@ Be thorough but efficient. Take screenshots after each key action. Report bugs c
 
 const ENV_TEMPLATE = `# Required: Anthropic API key for the Claude CLI
 ANTHROPIC_API_KEY=
+
+# Optional: OpenAI key so the Decisions API judges reports (otherwise output markers decide)
+OPENAI_API_KEY=
 `
 
 interface InitResult {
