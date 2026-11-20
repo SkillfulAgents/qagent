@@ -1,6 +1,6 @@
 {
   "name": "qagent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agentic E2E testing framework",
   "type": "module",
   "bin": {
