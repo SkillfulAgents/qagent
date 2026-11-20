@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { resolveRunId } from '../src/utils/run-id.ts'
+import { computeSessionCost } from '../src/utils/cost-helper.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -42,24 +46,59 @@ describe('resolveRunId', () => {
   })
 })
 
-describe('cost computation (internal logic via public CostInfo shape)', () => {
-  it('getPricing lookup is tested indirectly through computeSessionCost', async () => {
-    // computeSessionCost is async and reads files — we exercise the pure cost math
-    // by re-implementing the formula and confirming the expected values.
-    const inputPerMTok = 3   // sonnet
-    const outputPerMTok = 15
-    const input = 1_000_000
-    const output = 500_000
-    const cacheCreation = 200_000
-    const cacheRead = 100_000
+describe('computeSessionCost', () => {
+  async function writeSession(lines: object[]): Promise<string> {
+    const home = await mkdtemp(join(tmpdir(), 'qagent-cost-'))
+    const dir = join(home, '.claude', 'projects', '-tmp-project')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'session-1.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+    vi.stubEnv('HOME', home)
+    return home
+  }
 
-    const inputCost = (input / 1_000_000) * inputPerMTok
-    const outputCost = (output / 1_000_000) * outputPerMTok
-    const cacheWriteCost = (cacheCreation / 1_000_000) * inputPerMTok * 1.25
-    const cacheReadCost = (cacheRead / 1_000_000) * inputPerMTok * 0.10
-    const total = inputCost + outputCost + cacheWriteCost + cacheReadCost
+  const call = (id: string, model: string, usage: Record<string, number>) => ({
+    type: 'assistant',
+    message: { id, model, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, ...usage } },
+  })
 
-    // 3 + 7.5 + 0.75 + 0.03 = 11.28
-    expect(total).toBeCloseTo(11.28, 5)
+  it('prices claude-haiku-5-5 at its own rates and counts each API call once', async () => {
+    const usage = { input_tokens: 2, output_tokens: 300, cache_creation_input_tokens: 5000, cache_read_input_tokens: 20000 }
+    await writeSession([
+      { type: 'user', message: { content: 'Open example.com' } },
+      call('msg_1', 'claude-haiku-5-5', usage),
+      call('msg_1', 'claude-haiku-5-5', usage),
+      call('msg_2', 'claude-haiku-5-5', usage),
+    ])
+
+    const cost = await computeSessionCost('session-1')
+
+    // Per call: 2*0.1 + 300*0.5 + 5000*0.125 + 20000*0.01 = 975.2 per million tokens
+    expect(cost?.cacheReadTokens).toBe(40000)
+    expect(cost?.totalCostUsd).toBeCloseTo(2 * 975.2 / 1_000_000, 6)
+  })
+
+  it('uses long-context rates for a call whose prompt is over the threshold', async () => {
+    await writeSession([call('msg_1', 'claude-haiku-5-5', { cache_read_input_tokens: 120000, output_tokens: 100 })])
+
+    const cost = await computeSessionCost('session-1')
+
+    expect(cost?.totalCostUsd).toBeCloseTo((120000 * 0.05 + 100 * 2.5) / 1_000_000, 6)
+  })
+
+  it('matches dated ids and prefers the longest model id', async () => {
+    await writeSession([
+      call('msg_1', 'claude-haiku-4-5-20251001', { output_tokens: 1000 }),
+      call('msg_2', 'claude-sonnet-5-5', { cache_read_input_tokens: 1000 }),
+    ])
+
+    const cost = await computeSessionCost('session-1')
+
+    expect(cost?.totalCostUsd).toBeCloseTo((1000 * 5 + 1000 * 0.1) / 1_000_000, 6)
+  })
+
+  it('reports no cost for a model without a price', async () => {
+    await writeSession([call('msg_1', 'claude-future-9', { output_tokens: 1000 })])
+
+    expect(await computeSessionCost('session-1')).toBeNull()
   })
 })
